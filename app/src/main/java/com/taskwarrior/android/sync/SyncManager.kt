@@ -252,6 +252,7 @@ class SyncManager(
             "wait" -> task.copy(wait = op.value?.toLongOrNull())
             "scheduled" -> task.copy(scheduled = op.value?.toLongOrNull())
             "recur" -> task.copy(recur = op.value)
+            "depends" -> task.copy(depends = op.value)
             "modified" -> task.copy(modified = op.value?.toLongOrNull() ?: task.modified)
             else -> {
                 if (op.property.startsWith("tag.")) {

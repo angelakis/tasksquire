@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -23,11 +24,11 @@ import java.util.*
 fun TaskDetailScreen(
     taskUuid: String,
     viewModel: TaskViewModel,
+    onEdit: () -> Unit,
     onBack: () -> Unit
 ) {
-    val pendingTasks by viewModel.pendingTasks.collectAsState()
-    val completedTasks by viewModel.completedTasks.collectAsState()
-    val task = (pendingTasks + completedTasks).firstOrNull { it.uuid == taskUuid }
+    val allTasks by viewModel.allTasks.collectAsState()
+    val task = allTasks.firstOrNull { it.uuid == taskUuid }
 
     var showDeleteDialog by remember { mutableStateOf(false) }
 
@@ -60,6 +61,9 @@ fun TaskDetailScreen(
                 },
                 actions = {
                     if (task?.status == TaskStatus.PENDING) {
+                        IconButton(onClick = onEdit) {
+                            Icon(Icons.Filled.Edit, contentDescription = "Edit")
+                        }
                         IconButton(onClick = {
                             viewModel.completeTask(taskUuid)
                             onBack()
@@ -141,6 +145,19 @@ fun TaskDetailScreen(
                         )
                     }
                 }
+            }
+
+            val dependencies = task.getDependencyList()
+            if (dependencies.isNotEmpty()) {
+                DetailRow("Depends", dependencies.joinToString(", "))
+                val blocked = dependencies.any { depUuid ->
+                    val depTask = allTasks.firstOrNull { it.uuid == depUuid }
+                    depTask == null || (
+                        depTask.status != TaskStatus.COMPLETED &&
+                            depTask.status != TaskStatus.DELETED
+                        )
+                }
+                DetailRow("Blocked", if (blocked) "Yes" else "No")
             }
 
             HorizontalDivider()

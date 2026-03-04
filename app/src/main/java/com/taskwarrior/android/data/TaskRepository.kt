@@ -6,6 +6,7 @@ class TaskRepository(private val taskDao: TaskDao) {
 
     fun observePendingTasks(): Flow<List<Task>> = taskDao.observePendingTasks()
     fun observeCompletedTasks(): Flow<List<Task>> = taskDao.observeCompletedTasks()
+    fun observeAllTasks(): Flow<List<Task>> = taskDao.observeAllTasks()
     fun observeProjects(): Flow<List<String>> = taskDao.observeProjects()
     fun observeTagStrings(): Flow<List<String>> = taskDao.observeTagStrings()
 
@@ -29,6 +30,10 @@ class TaskRepository(private val taskDao: TaskDao) {
         taskDao.markTaskDeleted(uuid)
     }
 
+    suspend fun permanentlyDeleteTask(uuid: String) {
+        taskDao.deleteTaskByUuid(uuid)
+    }
+
     suspend fun markTaskSynced(uuid: String) {
         taskDao.markTaskSynced(uuid)
     }
@@ -39,5 +44,9 @@ class TaskRepository(private val taskDao: TaskDao) {
 
     suspend fun upsertTasksFromSync(tasks: List<Task>) {
         taskDao.insertTasks(tasks.map { it.copy(isSynced = true, isModifiedLocally = false) })
+    }
+
+    suspend fun upsertTaskRaw(task: Task) {
+        taskDao.insertTask(task)
     }
 }

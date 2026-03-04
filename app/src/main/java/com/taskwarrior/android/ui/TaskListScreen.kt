@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.sp
 import com.taskwarrior.android.data.Task
 import com.taskwarrior.android.data.TaskPriority
 import com.taskwarrior.android.data.TaskStatus
+import com.taskwarrior.android.ui.DependencyFilter
+import com.taskwarrior.android.ui.DueFilter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -43,17 +45,24 @@ fun TaskListScreen(
     val filterProject by viewModel.filterProject.collectAsState()
     val filterTag by viewModel.filterTag.collectAsState()
     val filterPriority by viewModel.filterPriority.collectAsState()
+    val dependencyFilter by viewModel.dependencyFilter.collectAsState()
+    val dueFilter by viewModel.dueFilter.collectAsState()
+    val canUndo by viewModel.canUndo.collectAsState()
+    val stats by viewModel.stats.collectAsState()
+    val recentHistory by viewModel.recentHistory.collectAsState()
     val allProjects by viewModel.projects.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
 
     var showCompleted by remember { mutableStateOf(false) }
     var searchExpanded by remember { mutableStateOf(false) }
     var showFilterSheet by remember { mutableStateOf(false) }
+    var showReportsSheet by remember { mutableStateOf(false) }
 
     val snackbarHostState = remember { SnackbarHostState() }
 
     val hasActiveFilters = searchQuery.isNotBlank() || filterProject != null ||
-            filterTag != null || filterPriority != null
+            filterTag != null || filterPriority != null ||
+            dependencyFilter != DependencyFilter.ALL || dueFilter != DueFilter.ALL
 
     LaunchedEffect(uiState) {
         when (val state = uiState) {
@@ -77,11 +86,27 @@ fun TaskListScreen(
             selectedProject = filterProject,
             selectedTag = filterTag,
             selectedPriority = filterPriority,
+            selectedDependencyFilter = dependencyFilter,
+            selectedDueFilter = dueFilter,
             onProjectSelected = { viewModel.setFilterProject(it) },
             onTagSelected = { viewModel.setFilterTag(it) },
             onPrioritySelected = { viewModel.setFilterPriority(it) },
+            onDependencyFilterSelected = { viewModel.setDependencyFilter(it) },
+            onDueFilterSelected = { viewModel.setDueFilter(it) },
             onClearAll = { viewModel.clearAllFilters() },
             onDismiss = { showFilterSheet = false }
+        )
+    }
+
+    if (showReportsSheet) {
+        ReportsBottomSheet(
+            stats = stats,
+            recentHistory = recentHistory,
+            onApplyReport = {
+                viewModel.applyReport(it)
+                showReportsSheet = false
+            },
+            onDismiss = { showReportsSheet = false }
         )
     }
 
@@ -155,6 +180,14 @@ fun TaskListScreen(
                         IconButton(onClick = onSettings) {
                             Icon(Icons.Filled.Settings, contentDescription = "Settings")
                         }
+                        IconButton(onClick = { showReportsSheet = true }) {
+                            Icon(Icons.Filled.BarChart, contentDescription = "Reports")
+                        }
+                        if (canUndo) {
+                            IconButton(onClick = { viewModel.undoLastAction() }) {
+                                Icon(Icons.Filled.Undo, contentDescription = "Undo")
+                            }
+                        }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = MaterialTheme.colorScheme.primaryContainer
@@ -193,6 +226,19 @@ fun TaskListScreen(
                             ActiveFilterChip(
                                 label = "Priority: ${it.name.lowercase().replaceFirstChar { c -> c.uppercase() }}",
                                 onRemove = { viewModel.setFilterPriority(null) }
+                            )
+                        }
+                        if (dependencyFilter != DependencyFilter.ALL) {
+                            ActiveFilterChip(
+                                label = if (dependencyFilter == DependencyFilter.BLOCKED) "Blocked"
+                                else "Unblocked",
+                                onRemove = { viewModel.setDependencyFilter(DependencyFilter.ALL) }
+                            )
+                        }
+                        if (dueFilter != DueFilter.ALL) {
+                            ActiveFilterChip(
+                                label = if (dueFilter == DueFilter.OVERDUE) "Overdue" else "Due Today",
+                                onRemove = { viewModel.setDueFilter(DueFilter.ALL) }
                             )
                         }
                         TextButton(
@@ -290,9 +336,13 @@ fun FilterBottomSheet(
     selectedProject: String?,
     selectedTag: String?,
     selectedPriority: TaskPriority?,
+    selectedDependencyFilter: DependencyFilter,
+    selectedDueFilter: DueFilter,
     onProjectSelected: (String?) -> Unit,
     onTagSelected: (String?) -> Unit,
     onPrioritySelected: (TaskPriority?) -> Unit,
+    onDependencyFilterSelected: (DependencyFilter) -> Unit,
+    onDueFilterSelected: (DueFilter) -> Unit,
     onClearAll: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -379,12 +429,101 @@ fun FilterBottomSheet(
                 }
             }
 
+            Text("Dependencies", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = selectedDependencyFilter == DependencyFilter.ALL,
+                    onClick = { onDependencyFilterSelected(DependencyFilter.ALL) },
+                    label = { Text("All") }
+                )
+                FilterChip(
+                    selected = selectedDependencyFilter == DependencyFilter.BLOCKED,
+                    onClick = { onDependencyFilterSelected(DependencyFilter.BLOCKED) },
+                    label = { Text("Blocked") }
+                )
+                FilterChip(
+                    selected = selectedDependencyFilter == DependencyFilter.UNBLOCKED,
+                    onClick = { onDependencyFilterSelected(DependencyFilter.UNBLOCKED) },
+                    label = { Text("Unblocked") }
+                )
+            }
+
+            Text("Due", style = MaterialTheme.typography.titleSmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = selectedDueFilter == DueFilter.ALL,
+                    onClick = { onDueFilterSelected(DueFilter.ALL) },
+                    label = { Text("All") }
+                )
+                FilterChip(
+                    selected = selectedDueFilter == DueFilter.OVERDUE,
+                    onClick = { onDueFilterSelected(DueFilter.OVERDUE) },
+                    label = { Text("Overdue") }
+                )
+                FilterChip(
+                    selected = selectedDueFilter == DueFilter.DUE_TODAY,
+                    onClick = { onDueFilterSelected(DueFilter.DUE_TODAY) },
+                    label = { Text("Due Today") }
+                )
+            }
+
             Spacer(Modifier.height(8.dp))
 
             Button(
                 onClick = onDismiss,
                 modifier = Modifier.fillMaxWidth()
             ) { Text("Apply") }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ReportsBottomSheet(
+    stats: TaskStats,
+    recentHistory: List<Task>,
+    onApplyReport: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("Reports", style = MaterialTheme.typography.titleLarge)
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = false, onClick = { onApplyReport("blocked") }, label = { Text("Blocked") })
+                FilterChip(selected = false, onClick = { onApplyReport("unblocked") }, label = { Text("Unblocked") })
+                FilterChip(selected = false, onClick = { onApplyReport("overdue") }, label = { Text("Overdue") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = false, onClick = { onApplyReport("due_today") }, label = { Text("Due Today") })
+                FilterChip(selected = false, onClick = { onApplyReport("high_priority") }, label = { Text("High Priority") })
+            }
+
+            HorizontalDivider()
+            Text("Stats", style = MaterialTheme.typography.titleMedium)
+            Text("Pending: ${stats.pending}  Completed: ${stats.completed}  Waiting: ${stats.waiting}")
+            Text("Blocked: ${stats.blocked}  Unblocked: ${stats.unblocked}")
+            Text("Overdue: ${stats.overdue}  Due Today: ${stats.dueToday}")
+
+            HorizontalDivider()
+            Text("History (recent completions)", style = MaterialTheme.typography.titleMedium)
+
+            if (recentHistory.isEmpty()) {
+                Text(
+                    "No completed tasks yet",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                val formatter = SimpleDateFormat("MMM dd HH:mm", Locale.getDefault())
+                for (task in recentHistory.take(10)) {
+                    Text("• ${formatter.format(Date(task.modified))}  ${task.description}")
+                }
+            }
         }
     }
 }
@@ -495,6 +634,12 @@ fun TaskItem(
                             text = dateStr,
                             color = if (isOverdue) MaterialTheme.colorScheme.errorContainer
                             else MaterialTheme.colorScheme.secondaryContainer
+                        )
+                    }
+                    if (task.getDependencyList().isNotEmpty()) {
+                        TaskChip(
+                            text = "Depends ${task.getDependencyList().size}",
+                            color = MaterialTheme.colorScheme.tertiaryContainer
                         )
                     }
                     for (tag in task.getTagList().take(3)) {

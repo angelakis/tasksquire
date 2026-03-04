@@ -25,6 +25,7 @@ data class Task(
     val wait: Long? = null, // epoch millis
     val scheduled: Long? = null, // epoch millis
     val recur: String? = null,
+    val depends: String? = null, // comma-separated UUID list
     val entry: Long = System.currentTimeMillis(), // creation time
     val modified: Long = System.currentTimeMillis(),
     val annotations: String? = null, // JSON array of {entry, description}
@@ -38,6 +39,14 @@ data class Task(
 
     fun withTagList(tagList: List<String>): Task {
         return copy(tags = tagList.joinToString(","))
+    }
+
+    fun getDependencyList(): List<String> {
+        return depends?.split(",")?.map { it.trim() }?.filter { it.isNotEmpty() } ?: emptyList()
+    }
+
+    fun withDependencyList(depList: List<String>): Task {
+        return copy(depends = depList.joinToString(",").ifBlank { null })
     }
 
     fun computedUrgency(): Double {

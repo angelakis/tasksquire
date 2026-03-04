@@ -52,6 +52,18 @@ fun TaskwarriorApp(viewModel: TaskViewModel) {
         }
 
         composable(
+            route = "edit_task/{uuid}",
+            arguments = listOf(navArgument("uuid") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val uuid = backStackEntry.arguments?.getString("uuid") ?: return@composable
+            AddTaskScreen(
+                viewModel = viewModel,
+                existingTaskUuid = uuid,
+                onBack = { navController.popBackStack() }
+            )
+        }
+
+        composable(
             route = "task_detail/{uuid}",
             arguments = listOf(navArgument("uuid") { type = NavType.StringType })
         ) { backStackEntry ->
@@ -59,6 +71,7 @@ fun TaskwarriorApp(viewModel: TaskViewModel) {
             TaskDetailScreen(
                 taskUuid = uuid,
                 viewModel = viewModel,
+                onEdit = { navController.navigate("edit_task/$uuid") },
                 onBack = { navController.popBackStack() }
             )
         }

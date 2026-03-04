@@ -31,6 +31,7 @@ object TaskImporter {
             wait = parseDate(obj.optStringOrNull("wait")),
             scheduled = parseDate(obj.optStringOrNull("scheduled")),
             recur = obj.optStringOrNull("recur"),
+            depends = parseDepends(obj),
             entry = parseDate(obj.optStringOrNull("entry")) ?: System.currentTimeMillis(),
             modified = parseDate(obj.optStringOrNull("modified")) ?: System.currentTimeMillis(),
             annotations = obj.optJSONArray("annotations")?.toString(),
@@ -63,6 +64,23 @@ object TaskImporter {
         } catch (_: Exception) {
             null
         }
+    }
+
+    private fun parseDepends(obj: JSONObject): String? {
+        val dependsArray = obj.optJSONArray("depends")
+        if (dependsArray != null) {
+            return (0 until dependsArray.length())
+                .mapNotNull { dependsArray.optString(it, null)?.takeIf { v -> v.isNotBlank() } }
+                .joinToString(",")
+                .ifBlank { null }
+        }
+
+        return obj.optStringOrNull("depends")
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.joinToString(",")
+            ?.ifBlank { null }
     }
 
     private fun JSONObject.optStringOrNull(key: String): String? {

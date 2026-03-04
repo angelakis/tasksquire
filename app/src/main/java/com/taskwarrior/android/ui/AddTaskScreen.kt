@@ -14,6 +14,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.taskwarrior.android.data.TaskPriority
+import com.taskwarrior.android.data.TaskStatus
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -30,11 +31,13 @@ fun AddTaskScreen(
     var tagsText by remember { mutableStateOf("") }
     var dueDate by remember { mutableStateOf<Long?>(null) }
     var recurrence by remember { mutableStateOf("") }
+    var dependsText by remember { mutableStateOf("") }
     var showDatePicker by remember { mutableStateOf(false) }
     var descriptionError by remember { mutableStateOf(false) }
 
     val projects by viewModel.projects.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
+    val allTasks by viewModel.allTasks.collectAsState()
 
     val datePickerState = rememberDatePickerState()
 
@@ -48,6 +51,22 @@ fun AddTaskScreen(
         "quarterly" to "Quarterly",
         "yearly" to "Yearly"
     )
+
+    val existingTask = remember(existingTaskUuid, allTasks) {
+        existingTaskUuid?.let { uuid -> allTasks.firstOrNull { it.uuid == uuid } }
+    }
+
+    LaunchedEffect(existingTask?.uuid) {
+        existingTask?.let { task ->
+            description = task.description
+            project = task.project.orEmpty()
+            priority = task.priority
+            tagsText = task.getTagList().joinToString(", ")
+            dueDate = task.due
+            recurrence = task.recur.orEmpty()
+            dependsText = task.getDependencyList().joinToString(", ")
+        }
+    }
 
     if (showDatePicker) {
         DatePickerDialog(
@@ -252,6 +271,44 @@ fun AddTaskScreen(
                 )
             }
 
+            // Dependencies
+            OutlinedTextField(
+                value = dependsText,
+                onValueChange = { dependsText = it },
+                label = { Text("Depends (UUIDs, comma-separated)") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+                maxLines = 3,
+                supportingText = {
+                    Text("Task is blocked until these tasks are completed")
+                }
+            )
+            val dependencyCandidates = allTasks
+                .filter { it.status == TaskStatus.PENDING || it.status == TaskStatus.WAITING }
+                .filter { it.uuid != existingTaskUuid }
+                .take(8)
+            if (dependencyCandidates.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val currentDeps = dependsText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+                    for (candidate in dependencyCandidates) {
+                        val shortUuid = candidate.uuid.take(8)
+                        val selected = currentDeps.contains(candidate.uuid)
+                        FilterChip(
+                            selected = selected,
+                            onClick = {
+                                val deps = currentDeps.toMutableList()
+                                if (selected) deps.remove(candidate.uuid) else deps.add(candidate.uuid)
+                                dependsText = deps.joinToString(", ")
+                            },
+                            label = { Text("${candidate.description.take(18)} ($shortUuid)") }
+                        )
+                    }
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
             // Save button
@@ -264,19 +321,37 @@ fun AddTaskScreen(
                     val tags = tagsText.split(",")
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
-                    viewModel.addTask(
-                        description = description.trim(),
-                        project = project.trim().ifBlank { null },
-                        priority = priority,
-                        tags = tags,
-                        due = dueDate,
-                        recur = recurrence.ifBlank { null }
-                    )
+                    val depends = dependsText.split(",")
+                        .map { it.trim() }
+                        .filter { it.isNotBlank() }
+                    if (existingTask != null) {
+                        viewModel.updateTask(
+                            existingTask.copy(
+                                description = description.trim(),
+                                project = project.trim().ifBlank { null },
+                                priority = priority,
+                                tags = tags.joinToString(",").ifBlank { null },
+                                due = dueDate,
+                                recur = recurrence.ifBlank { null },
+                                depends = depends.joinToString(",").ifBlank { null }
+                            )
+                        )
+                    } else {
+                        viewModel.addTask(
+                            description = description.trim(),
+                            project = project.trim().ifBlank { null },
+                            priority = priority,
+                            tags = tags,
+                            due = dueDate,
+                            recur = recurrence.ifBlank { null },
+                            depends = depends
+                        )
+                    }
                     onBack()
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Save Task")
+                Text(if (existingTask == null) "Save Task" else "Update Task")
             }
         }
     }

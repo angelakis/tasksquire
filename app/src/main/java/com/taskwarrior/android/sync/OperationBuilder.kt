@@ -30,6 +30,7 @@ object OperationBuilder {
         task.wait?.let { ops.add(Operation.Update(task.uuid, "wait", it.toString(), now)) }
         task.scheduled?.let { ops.add(Operation.Update(task.uuid, "scheduled", it.toString(), now)) }
         task.recur?.let { ops.add(Operation.Update(task.uuid, "recur", it, now)) }
+        task.depends?.let { ops.add(Operation.Update(task.uuid, "depends", it, now)) }
 
         val tagList = task.getTagList()
         if (tagList.isNotEmpty()) {
@@ -63,6 +64,7 @@ object OperationBuilder {
         ops.add(Operation.Update(task.uuid, "wait", task.wait?.toString(), now))
         ops.add(Operation.Update(task.uuid, "scheduled", task.scheduled?.toString(), now))
         ops.add(Operation.Update(task.uuid, "recur", task.recur, now))
+        ops.add(Operation.Update(task.uuid, "depends", task.depends, now))
 
         return ops
     }
@@ -115,6 +117,7 @@ object OperationBuilder {
             wait = props["wait"]?.toLongOrNull(),
             scheduled = props["scheduled"]?.toLongOrNull(),
             recur = props["recur"],
+            depends = props["depends"],
             entry = props["entry"]?.toLongOrNull() ?: System.currentTimeMillis(),
             modified = props["modified"]?.toLongOrNull() ?: System.currentTimeMillis(),
             isSynced = true,
@@ -139,6 +142,7 @@ object OperationBuilder {
         task.wait?.let { props["wait"] = it.toString() }
         task.scheduled?.let { props["scheduled"] = it.toString() }
         task.recur?.let { props["recur"] = it }
+        task.depends?.let { props["depends"] = it }
         for (tag in task.getTagList()) {
             props["tag.$tag"] = ""
         }
