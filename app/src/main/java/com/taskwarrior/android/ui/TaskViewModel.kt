@@ -97,6 +97,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _filterTag = MutableStateFlow<String?>(null)
     val filterTag: StateFlow<String?> = _filterTag.asStateFlow()
+    private val _filterUntagged = MutableStateFlow(false)
+    val filterUntagged: StateFlow<Boolean> = _filterUntagged.asStateFlow()
 
     private val _filterPriority = MutableStateFlow<TaskPriority?>(null)
     val filterPriority: StateFlow<TaskPriority?> = _filterPriority.asStateFlow()
@@ -156,16 +158,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val dueFilter: DueFilter
     )
 
+    private data class CompletedFilterPayload(
+        val tasks: List<Task>,
+        val query: String,
+        val project: String?,
+        val tag: String?,
+        val priority: TaskPriority?
+    )
+
     private val pendingFilterState: StateFlow<PendingFilterState> = combine(
         _searchQuery,
         _filterProject,
         _filterTag,
-        _filterPriority
-    ) { query, project, tag, priority ->
+        _filterPriority,
+        _filterUntagged
+    ) { query, project, tag, priority, filterUntagged ->
         PendingFilterState(
             query = query,
             project = project,
-            tag = tag,
+            tag = if (filterUntagged) null else tag,
             priority = priority,
             dependencyFilter = _dependencyFilter.value,
             dueFilter = _dueFilter.value
@@ -189,7 +200,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 task.project?.contains(filterState.query, ignoreCase = true) == true ||
                 task.getTagList().any { it.contains(filterState.query, ignoreCase = true) }) &&
             (filterState.project == null || task.project == filterState.project) &&
-            (filterState.tag == null || task.getTagList().contains(filterState.tag)) &&
+            ((_filterUntagged.value && task.getTagList().isEmpty()) ||
+                (!_filterUntagged.value && (filterState.tag == null || task.getTagList().contains(filterState.tag)))) &&
             (filterState.priority == null || task.priority == filterState.priority) &&
             (filterState.dependencyFilter == DependencyFilter.ALL ||
                 (filterState.dependencyFilter == DependencyFilter.BLOCKED && blocked) ||
@@ -200,19 +212,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     // Filtered completed tasks
     val filteredCompletedTasks: StateFlow<List<Task>> = combine(
-        completedTasks,
-        _searchQuery,
-        _filterProject,
-        _filterTag,
-        _filterPriority
-    ) { tasks, query, project, tag, priority ->
-        tasks.filter { task ->
-            (query.isBlank() || task.description.contains(query, ignoreCase = true) ||
-                task.project?.contains(query, ignoreCase = true) == true ||
-                task.getTagList().any { it.contains(query, ignoreCase = true) }) &&
-            (project == null || task.project == project) &&
-            (tag == null || task.getTagList().contains(tag)) &&
-            (priority == null || task.priority == priority)
+        combine(
+            completedTasks,
+            _searchQuery,
+            _filterProject,
+            _filterTag,
+            _filterPriority
+        ) { tasks, query, project, tag, priority ->
+            CompletedFilterPayload(tasks, query, project, tag, priority)
+        },
+        _filterUntagged
+    ) { payload, filterUntagged ->
+        payload.tasks.filter { task ->
+            (payload.query.isBlank() || task.description.contains(payload.query, ignoreCase = true) ||
+                task.project?.contains(payload.query, ignoreCase = true) == true ||
+                task.getTagList().any { it.contains(payload.query, ignoreCase = true) }) &&
+            (payload.project == null || task.project == payload.project) &&
+            ((filterUntagged && task.getTagList().isEmpty()) ||
+                (!filterUntagged && (payload.tag == null || task.getTagList().contains(payload.tag)))) &&
+            (payload.priority == null || task.priority == payload.priority)
         }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -235,7 +253,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setSearchQuery(query: String) { _searchQuery.value = query }
     fun setFilterProject(project: String?) { _filterProject.value = project }
-    fun setFilterTag(tag: String?) { _filterTag.value = tag }
+    fun setFilterTag(tag: String?) {
+        _filterTag.value = tag
+        if (tag != null) _filterUntagged.value = false
+    }
+    fun setFilterUntagged(enabled: Boolean) {
+        _filterUntagged.value = enabled
+        if (enabled) _filterTag.value = null
+    }
     fun setFilterPriority(priority: TaskPriority?) { _filterPriority.value = priority }
     fun setDependencyFilter(filter: DependencyFilter) { _dependencyFilter.value = filter }
     fun setDueFilter(filter: DueFilter) { _dueFilter.value = filter }
@@ -244,6 +269,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _searchQuery.value = ""
         _filterProject.value = null
         _filterTag.value = null
+        _filterUntagged.value = false
         _filterPriority.value = null
         _dependencyFilter.value = DependencyFilter.ALL
         _dueFilter.value = DueFilter.ALL
@@ -253,6 +279,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         get() = _searchQuery.value.isNotBlank() ||
             _filterProject.value != null ||
             _filterTag.value != null ||
+            _filterUntagged.value ||
             _filterPriority.value != null ||
             _dependencyFilter.value != DependencyFilter.ALL ||
             _dueFilter.value != DueFilter.ALL

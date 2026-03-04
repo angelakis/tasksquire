@@ -44,6 +44,7 @@ fun TaskListScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val filterProject by viewModel.filterProject.collectAsState()
     val filterTag by viewModel.filterTag.collectAsState()
+    val filterUntagged by viewModel.filterUntagged.collectAsState()
     val filterPriority by viewModel.filterPriority.collectAsState()
     val dependencyFilter by viewModel.dependencyFilter.collectAsState()
     val dueFilter by viewModel.dueFilter.collectAsState()
@@ -61,7 +62,7 @@ fun TaskListScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     val hasActiveFilters = searchQuery.isNotBlank() || filterProject != null ||
-            filterTag != null || filterPriority != null ||
+            filterTag != null || filterUntagged || filterPriority != null ||
             dependencyFilter != DependencyFilter.ALL || dueFilter != DueFilter.ALL
 
     LaunchedEffect(uiState) {
@@ -85,11 +86,13 @@ fun TaskListScreen(
             tags = allTags,
             selectedProject = filterProject,
             selectedTag = filterTag,
+            selectedUntagged = filterUntagged,
             selectedPriority = filterPriority,
             selectedDependencyFilter = dependencyFilter,
             selectedDueFilter = dueFilter,
             onProjectSelected = { viewModel.setFilterProject(it) },
             onTagSelected = { viewModel.setFilterTag(it) },
+            onUntaggedSelected = { viewModel.setFilterUntagged(it) },
             onPrioritySelected = { viewModel.setFilterPriority(it) },
             onDependencyFilterSelected = { viewModel.setDependencyFilter(it) },
             onDueFilterSelected = { viewModel.setDueFilter(it) },
@@ -222,6 +225,12 @@ fun TaskListScreen(
                                 onRemove = { viewModel.setFilterTag(null) }
                             )
                         }
+                        if (filterUntagged) {
+                            ActiveFilterChip(
+                                label = "Not tagged",
+                                onRemove = { viewModel.setFilterUntagged(false) }
+                            )
+                        }
                         filterPriority?.let {
                             ActiveFilterChip(
                                 label = "Priority: ${it.name.lowercase().replaceFirstChar { c -> c.uppercase() }}",
@@ -335,11 +344,13 @@ fun FilterBottomSheet(
     tags: List<String>,
     selectedProject: String?,
     selectedTag: String?,
+    selectedUntagged: Boolean,
     selectedPriority: TaskPriority?,
     selectedDependencyFilter: DependencyFilter,
     selectedDueFilter: DueFilter,
     onProjectSelected: (String?) -> Unit,
     onTagSelected: (String?) -> Unit,
+    onUntaggedSelected: (Boolean) -> Unit,
     onPrioritySelected: (TaskPriority?) -> Unit,
     onDependencyFilterSelected: (DependencyFilter) -> Unit,
     onDueFilterSelected: (DueFilter) -> Unit,
@@ -406,26 +417,36 @@ fun FilterBottomSheet(
             }
 
             // Tag filter
-            if (tags.isNotEmpty()) {
-                Text("Tag", style = MaterialTheme.typography.titleSmall)
-                Row(
-                    modifier = Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
+            Text("Tag", style = MaterialTheme.typography.titleSmall)
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                FilterChip(
+                    selected = selectedTag == null && !selectedUntagged,
+                    onClick = {
+                        onUntaggedSelected(false)
+                        onTagSelected(null)
+                    },
+                    label = { Text("All") }
+                )
+                FilterChip(
+                    selected = selectedUntagged,
+                    onClick = {
+                        onUntaggedSelected(!selectedUntagged)
+                        if (!selectedUntagged) onTagSelected(null)
+                    },
+                    label = { Text("Not tagged") }
+                )
+                for (tag in tags) {
                     FilterChip(
-                        selected = selectedTag == null,
-                        onClick = { onTagSelected(null) },
-                        label = { Text("All") }
+                        selected = selectedTag == tag && !selectedUntagged,
+                        onClick = {
+                            onUntaggedSelected(false)
+                            onTagSelected(if (selectedTag == tag) null else tag)
+                        },
+                        label = { Text("+$tag") }
                     )
-                    for (tag in tags) {
-                        FilterChip(
-                            selected = selectedTag == tag,
-                            onClick = {
-                                onTagSelected(if (selectedTag == tag) null else tag)
-                            },
-                            label = { Text("+$tag") }
-                        )
-                    }
                 }
             }
 
