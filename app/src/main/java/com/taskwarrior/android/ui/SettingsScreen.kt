@@ -265,6 +265,32 @@ fun SettingsScreen(
             HorizontalDivider()
 
             Text(
+                text = "Danger Zone",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.error
+            )
+
+            Text(
+                text = "Clearing the database removes all cached tasks. " +
+                    "It keeps your sync settings intact so you can re-sync from the server.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error
+            )
+
+            Button(
+                onClick = { viewModel.clearLocalDatabase() },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )
+            ) {
+                Text("Clear local database")
+            }
+
+            HorizontalDivider()
+
+            Text(
                 text = "About",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary

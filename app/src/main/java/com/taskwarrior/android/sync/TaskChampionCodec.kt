@@ -11,7 +11,6 @@ import org.json.JSONObject
 object TaskChampionCodec {
 
     fun encodeHistorySegment(operations: List<Operation>): ByteArray {
-        val root = JSONObject()
         val ops = JSONArray()
         for (op in operations) {
             val opObj = when (op) {
@@ -36,13 +35,11 @@ object TaskChampionCodec {
             }
             ops.put(opObj)
         }
-        root.put("operations", ops)
-        return root.toString().toByteArray(Charsets.UTF_8)
+        return ops.toString().toByteArray(Charsets.UTF_8)
     }
 
     fun decodeHistorySegment(bytes: ByteArray): List<Operation> {
-        val root = JSONObject(bytes.toString(Charsets.UTF_8))
-        val ops = root.optJSONArray("operations") ?: JSONArray()
+        val ops = JSONArray(bytes.toString(Charsets.UTF_8))
         return buildList {
             for (i in 0 until ops.length()) {
                 val opObj = ops.optJSONObject(i) ?: continue

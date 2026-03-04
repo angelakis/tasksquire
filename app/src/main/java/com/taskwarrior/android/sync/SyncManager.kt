@@ -7,6 +7,8 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.taskwarrior.android.data.Task
 import com.taskwarrior.android.data.TaskRepository
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
@@ -108,7 +110,7 @@ class SyncManager(
                     when (result) {
                         is SyncResult.Success -> log(
                             SyncLogLevel.INFO,
-                            "Sync complete: sent=${result.operationsSent}, received=${result.operationsApplied}"
+                            "Sync complete: sent=${result.tasksSent} tasks, received=${result.tasksReceived} tasks"
                         )
                         is SyncResult.Error -> log(SyncLogLevel.ERROR, "Sync failed: ${result.message}")
                         SyncResult.NoServerConfigured -> log(SyncLogLevel.WARN, "Sync skipped: no server configured")
@@ -163,14 +165,18 @@ class SyncManager(
             return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
         }
 
-        var serverOperationsApplied = 0
+        var serverTasksReceived = 0
         if (serverOps != null) {
             val (newVersionId, operations) = serverOps
             applyOperationsToLocal(operations)
-            serverOperationsApplied = operations.size
+            serverTasksReceived = operations.map { when (it) {
+                is Operation.Create -> it.uuid
+                is Operation.Update -> it.uuid
+                is Operation.Delete -> it.uuid
+            } }.distinct().size
             lastVersion = newVersionId
             saveLastVersion(lastVersion)
-            log(SyncLogLevel.INFO, "Applied $serverOperationsApplied server operations")
+            log(SyncLogLevel.INFO, "Received $serverTasksReceived tasks (${operations.size} operations)")
         } else {
             log(SyncLogLevel.INFO, "No child version found for $lastVersion")
         }
@@ -181,7 +187,7 @@ class SyncManager(
         log(SyncLogLevel.INFO, "Prepared ${localOps.size} local operations from ${modifiedTasks.size} modified tasks")
 
         if (localOps.isEmpty()) {
-            return SyncResult.Success(serverOperationsApplied, 0)
+            return SyncResult.Success(serverTasksReceived, 0)
         }
 
         // Upload local operations
@@ -209,7 +215,7 @@ class SyncManager(
             uploadSnapshot(client, newVersionId)
         }
 
-        return SyncResult.Success(serverOperationsApplied, localOps.size)
+        return SyncResult.Success(serverTasksReceived, modifiedTasks.size)
     }
 
     private suspend fun applyOperationsToLocal(operations: List<Operation>) {
@@ -280,24 +286,60 @@ class SyncManager(
                 else -> com.taskwarrior.android.data.TaskPriority.NONE
             })
             "project" -> task.copy(project = op.value)
-            "due" -> task.copy(due = op.value?.toLongOrNull())
-            "wait" -> task.copy(wait = op.value?.toLongOrNull())
-            "scheduled" -> task.copy(scheduled = op.value?.toLongOrNull())
+            "due" -> task.copy(due = parseTaskChampionTimestamp(op.value))
+            "wait" -> task.copy(wait = parseTaskChampionTimestamp(op.value))
+            "scheduled" -> task.copy(scheduled = parseTaskChampionTimestamp(op.value))
             "recur" -> task.copy(recur = op.value)
-            "depends" -> task.copy(depends = op.value)
-            "modified" -> task.copy(modified = op.value?.toLongOrNull() ?: task.modified)
+            "entry" -> task.copy(entry = parseTaskChampionTimestamp(op.value) ?: task.entry)
+            "modified" -> task.copy(modified = parseTaskChampionTimestamp(op.value) ?: task.modified)
             else -> {
-                if (op.property.startsWith("tag.")) {
-                    val tag = op.property.removePrefix("tag.")
-                    val tags = task.getTagList().toMutableList()
-                    if (op.value != null) {
-                        if (!tags.contains(tag)) tags.add(tag)
-                    } else {
-                        tags.remove(tag)
+                when {
+                    op.property.startsWith("tag_") -> {
+                        val tag = op.property.removePrefix("tag_")
+                        val tags = task.getTagList().toMutableList()
+                        if (op.value != null) {
+                            if (!tags.contains(tag)) tags.add(tag)
+                        } else {
+                            tags.remove(tag)
+                        }
+                        task.withTagList(tags)
                     }
-                    task.withTagList(tags)
-                } else {
-                    task
+                    op.property.startsWith("dep_") -> {
+                        val dep = op.property.removePrefix("dep_")
+                        val deps = task.getDependencyList().toMutableList()
+                        if (op.value != null) {
+                            if (!deps.contains(dep)) deps.add(dep)
+                        } else {
+                            deps.remove(dep)
+                        }
+                        task.withDependencyList(deps)
+                    }
+                    op.property.startsWith("annotation_") -> {
+                        val tsStr = op.property.removePrefix("annotation_")
+                        val ts = tsStr.toLongOrNull() ?: return task
+                        val entryMillis = ts * 1000
+                        val annotations = mutableListOf<JSONObject>()
+                        task.annotations?.let {
+                            try {
+                                val arr = JSONArray(it)
+                                for (i in 0 until arr.length()) {
+                                    annotations.add(arr.getJSONObject(i))
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        if (op.value != null) {
+                            annotations.removeAll { it.optLong("entry") == entryMillis }
+                            annotations.add(JSONObject().apply {
+                                put("entry", entryMillis)
+                                put("description", op.value)
+                            })
+                        } else {
+                            annotations.removeAll { it.optLong("entry") == entryMillis }
+                        }
+                        val jsonStr = if (annotations.isEmpty()) null else JSONArray(annotations).toString()
+                        task.copy(annotations = jsonStr)
+                    }
+                    else -> task
                 }
             }
         }

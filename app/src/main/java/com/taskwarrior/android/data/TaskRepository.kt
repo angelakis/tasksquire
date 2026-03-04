@@ -49,4 +49,8 @@ class TaskRepository(private val taskDao: TaskDao) {
     suspend fun upsertTaskRaw(task: Task) {
         taskDao.insertTask(task)
     }
+
+    suspend fun clearAllTasks() {
+        taskDao.deleteAllTasks()
+    }
 }

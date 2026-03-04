@@ -71,7 +71,7 @@ data class Snapshot(
  * Result of a sync operation
  */
 sealed class SyncResult {
-    data class Success(val operationsApplied: Int, val operationsSent: Int) : SyncResult()
+    data class Success(val tasksReceived: Int, val tasksSent: Int) : SyncResult()
     data class Error(val message: String, val cause: Throwable? = null) : SyncResult()
     object NoServerConfigured : SyncResult()
     object NotModified : SyncResult()

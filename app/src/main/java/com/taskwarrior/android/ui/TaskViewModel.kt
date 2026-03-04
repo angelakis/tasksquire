@@ -155,6 +155,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val project: String?,
         val tag: String?,
         val priority: TaskPriority?,
+        val filterUntagged: Boolean,
         val dependencyFilter: DependencyFilter,
         val dueFilter: DueFilter
     )
@@ -179,13 +180,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             project = project,
             tag = if (filterUntagged) null else tag,
             priority = priority,
+            filterUntagged = filterUntagged,
             dependencyFilter = _dependencyFilter.value,
             dueFilter = _dueFilter.value
         )
     }.stateIn(
         viewModelScope,
         SharingStarted.Eagerly,
-        PendingFilterState("", null, null, null, DependencyFilter.ALL, DueFilter.ALL)
+        PendingFilterState("", null, null, null, false, DependencyFilter.ALL, DueFilter.ALL)
     )
 
     // Filtered pending tasks
@@ -201,8 +203,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 task.project?.contains(filterState.query, ignoreCase = true) == true ||
                 task.getTagList().any { it.contains(filterState.query, ignoreCase = true) }) &&
             (filterState.project == null || task.project == filterState.project) &&
-            ((_filterUntagged.value && task.getTagList().isEmpty()) ||
-                (!_filterUntagged.value && (filterState.tag == null || task.getTagList().contains(filterState.tag)))) &&
+            ((filterState.filterUntagged && task.getTagList().isEmpty()) ||
+                (!filterState.filterUntagged && (filterState.tag == null || task.getTagList().contains(filterState.tag)))) &&
             (filterState.priority == null || task.priority == filterState.priority) &&
             (filterState.dependencyFilter == DependencyFilter.ALL ||
                 (filterState.dependencyFilter == DependencyFilter.BLOCKED && blocked) ||
@@ -379,7 +381,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             _syncLogs.value = syncManager.getSyncLogs()
             _uiState.value = when (result) {
                 is SyncResult.Success ->
-                    UiState.SyncSuccess("Sync complete: ${result.operationsSent} sent, ${result.operationsApplied} received")
+                    UiState.SyncSuccess("Sync complete: ${result.tasksSent} sent, ${result.tasksReceived} received")
                 is SyncResult.Error -> UiState.Error(result.message)
                 SyncResult.NoServerConfigured -> UiState.Error("No sync server configured")
                 SyncResult.NotModified -> UiState.SyncSuccess("Already up to date")
@@ -464,6 +466,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             } catch (e: Exception) {
                 _uiState.value = UiState.Error("Import failed: ${e.message}")
             }
+        }
+    }
+
+    fun clearLocalDatabase() {
+        viewModelScope.launch {
+            repository.clearAllTasks()
+            _syncLogs.value = syncManager.getSyncLogs()
+            _uiState.value = UiState.SyncSuccess("Local task database cleared")
         }
     }
 
