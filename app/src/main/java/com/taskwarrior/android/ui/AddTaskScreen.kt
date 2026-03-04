@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -31,7 +32,8 @@ fun AddTaskScreen(
     var tagsText by remember { mutableStateOf("") }
     var dueDate by remember { mutableStateOf<Long?>(null) }
     var recurrence by remember { mutableStateOf("") }
-    var dependsText by remember { mutableStateOf("") }
+    var dependsQuery by remember { mutableStateOf("") }
+    var selectedDependencies by remember { mutableStateOf<List<String>>(emptyList()) }
     var showDatePicker by remember { mutableStateOf(false) }
     var descriptionError by remember { mutableStateOf(false) }
 
@@ -64,7 +66,7 @@ fun AddTaskScreen(
             tagsText = task.getTagList().joinToString(", ")
             dueDate = task.due
             recurrence = task.recur.orEmpty()
-            dependsText = task.getDependencyList().joinToString(", ")
+            selectedDependencies = task.getDependencyList()
         }
     }
 
@@ -272,36 +274,67 @@ fun AddTaskScreen(
             }
 
             // Dependencies
-            OutlinedTextField(
-                value = dependsText,
-                onValueChange = { dependsText = it },
-                label = { Text("Depends (UUIDs, comma-separated)") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = false,
-                maxLines = 3,
-                supportingText = {
-                    Text("Task is blocked until these tasks are completed")
-                }
+            Text(
+                text = "Depends on",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            OutlinedTextField(
+                value = dependsQuery,
+                onValueChange = { dependsQuery = it },
+                label = { Text("Search tasks") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                supportingText = { Text("Task is blocked until selected tasks are completed") }
+            )
+
+            if (selectedDependencies.isNotEmpty()) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    for (depUuid in selectedDependencies) {
+                        val depTask = allTasks.firstOrNull { it.uuid == depUuid }
+                        val label = depTask?.description?.take(20) ?: depUuid.take(8)
+                        InputChip(
+                            selected = true,
+                            onClick = {
+                                selectedDependencies = selectedDependencies.filterNot { it == depUuid }
+                            },
+                            label = { Text(label) },
+                            trailingIcon = {
+                                Icon(
+                                    Icons.Filled.Close,
+                                    contentDescription = "Remove dependency",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        )
+                    }
+                }
+            }
+
             val dependencyCandidates = allTasks
                 .filter { it.status == TaskStatus.PENDING || it.status == TaskStatus.WAITING }
                 .filter { it.uuid != existingTaskUuid }
+                .filter { it.uuid !in selectedDependencies }
+                .filter {
+                    dependsQuery.isBlank() ||
+                        it.description.contains(dependsQuery, ignoreCase = true) ||
+                        it.project?.contains(dependsQuery, ignoreCase = true) == true
+                }
                 .take(8)
             if (dependencyCandidates.isNotEmpty()) {
                 Row(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val currentDeps = dependsText.split(",").map { it.trim() }.filter { it.isNotEmpty() }
                     for (candidate in dependencyCandidates) {
                         val shortUuid = candidate.uuid.take(8)
-                        val selected = currentDeps.contains(candidate.uuid)
-                        FilterChip(
-                            selected = selected,
+                        SuggestionChip(
                             onClick = {
-                                val deps = currentDeps.toMutableList()
-                                if (selected) deps.remove(candidate.uuid) else deps.add(candidate.uuid)
-                                dependsText = deps.joinToString(", ")
+                                selectedDependencies = selectedDependencies + candidate.uuid
+                                dependsQuery = ""
                             },
                             label = { Text("${candidate.description.take(18)} ($shortUuid)") }
                         )
@@ -321,9 +354,6 @@ fun AddTaskScreen(
                     val tags = tagsText.split(",")
                         .map { it.trim() }
                         .filter { it.isNotBlank() }
-                    val depends = dependsText.split(",")
-                        .map { it.trim() }
-                        .filter { it.isNotBlank() }
                     if (existingTask != null) {
                         viewModel.updateTask(
                             existingTask.copy(
@@ -333,7 +363,7 @@ fun AddTaskScreen(
                                 tags = tags.joinToString(",").ifBlank { null },
                                 due = dueDate,
                                 recur = recurrence.ifBlank { null },
-                                depends = depends.joinToString(",").ifBlank { null }
+                                depends = selectedDependencies.joinToString(",").ifBlank { null }
                             )
                         )
                     } else {
@@ -344,7 +374,7 @@ fun AddTaskScreen(
                             tags = tags,
                             due = dueDate,
                             recur = recurrence.ifBlank { null },
-                            depends = depends
+                            depends = selectedDependencies
                         )
                     }
                     onBack()
