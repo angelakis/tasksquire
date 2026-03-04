@@ -29,6 +29,7 @@ fun SettingsScreen(
 ) {
     val context = LocalContext.current
     val existingConfig by viewModel.syncConfig.collectAsState()
+    val autoSyncEnabled by viewModel.autoSyncEnabled.collectAsState()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -138,6 +139,35 @@ fun SettingsScreen(
                     enabled = serverUrl.isNotBlank() && clientId.isNotBlank()
                 ) {
                     Text("Save")
+                }
+            }
+
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Autosync",
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                        Text(
+                            text = "When enabled, sync runs after local changes, when the app returns to foreground, and periodically in background.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    Switch(
+                        checked = autoSyncEnabled,
+                        onCheckedChange = { viewModel.setAutoSyncEnabled(it) }
+                    )
                 }
             }
 

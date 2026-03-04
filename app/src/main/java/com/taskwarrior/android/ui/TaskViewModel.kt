@@ -8,6 +8,7 @@ import com.taskwarrior.android.data.TaskDatabase
 import com.taskwarrior.android.data.TaskImporter
 import com.taskwarrior.android.data.TaskPriority
 import com.taskwarrior.android.data.TaskRepository
+import com.taskwarrior.android.sync.AutoSyncScheduler
 import com.taskwarrior.android.sync.SyncManager
 import com.taskwarrior.android.sync.SyncResult
 import com.taskwarrior.android.sync.SyncServerConfig
@@ -98,10 +99,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _syncConfig = MutableStateFlow<SyncServerConfig?>(null)
     val syncConfig: StateFlow<SyncServerConfig?> = _syncConfig.asStateFlow()
+    private val _autoSyncEnabled = MutableStateFlow(false)
+    val autoSyncEnabled: StateFlow<Boolean> = _autoSyncEnabled.asStateFlow()
 
     init {
         viewModelScope.launch {
             _syncConfig.value = syncManager.getServerConfig()
+            _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
+            AutoSyncScheduler.schedulePeriodicSync(application, _autoSyncEnabled.value)
         }
     }
 
@@ -129,7 +134,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         due: Long? = null,
         recur: String? = null,
         scheduled: Long? = null,
-        wait: Long? = null
+        wait: Long? = null,
+        skipSync: Boolean = false
     ) {
         viewModelScope.launch {
             val task = Task(
@@ -143,24 +149,28 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 wait = wait
             )
             repository.addTask(task)
+            triggerAutoSync(skipSync)
         }
     }
 
-    fun updateTask(task: Task) {
+    fun updateTask(task: Task, skipSync: Boolean = false) {
         viewModelScope.launch {
             repository.updateTask(task)
+            triggerAutoSync(skipSync)
         }
     }
 
-    fun completeTask(uuid: String) {
+    fun completeTask(uuid: String, skipSync: Boolean = false) {
         viewModelScope.launch {
             repository.completeTask(uuid)
+            triggerAutoSync(skipSync)
         }
     }
 
-    fun deleteTask(uuid: String) {
+    fun deleteTask(uuid: String, skipSync: Boolean = false) {
         viewModelScope.launch {
             repository.deleteTask(uuid)
+            triggerAutoSync(skipSync)
         }
     }
 
@@ -183,7 +193,34 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val config = SyncServerConfig(serverUrl, clientId, secret.takeIf { it.isNotBlank() })
             syncManager.saveServerConfig(config)
             _syncConfig.value = config
+            _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
+            AutoSyncScheduler.schedulePeriodicSync(getApplication(), _autoSyncEnabled.value)
+            if (_autoSyncEnabled.value) {
+                AutoSyncScheduler.enqueueForegroundSync(getApplication())
+            }
             _uiState.value = UiState.SyncSuccess("Settings saved")
+        }
+    }
+
+    fun setAutoSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            syncManager.setAutoSyncEnabled(enabled)
+            _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
+            AutoSyncScheduler.schedulePeriodicSync(getApplication(), _autoSyncEnabled.value)
+            _uiState.value = UiState.SyncSuccess(
+                if (_autoSyncEnabled.value) "Autosync enabled" else "Autosync disabled"
+            )
+        }
+    }
+
+    fun onAppForegrounded() {
+        viewModelScope.launch {
+            val enabled = syncManager.isAutoSyncEnabled()
+            _autoSyncEnabled.value = enabled
+            AutoSyncScheduler.schedulePeriodicSync(getApplication(), enabled)
+            if (enabled) {
+                AutoSyncScheduler.enqueueForegroundSync(getApplication())
+            }
         }
     }
 
@@ -209,5 +246,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun dismissMessage() {
         _uiState.value = UiState.Idle
+    }
+
+    private suspend fun triggerAutoSync(skipSync: Boolean) {
+        if (skipSync) return
+        val enabled = syncManager.isAutoSyncEnabled()
+        _autoSyncEnabled.value = enabled
+        if (enabled) {
+            AutoSyncScheduler.enqueueMutationSync(getApplication())
+        }
     }
 }

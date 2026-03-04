@@ -1,6 +1,7 @@
 package com.taskwarrior.android.sync
 
 import android.content.Context
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,12 +32,19 @@ class SyncManager(
         private val KEY_SERVER_URL = stringPreferencesKey("server_url")
         private val KEY_CLIENT_ID = stringPreferencesKey("client_id")
         private val KEY_ENCRYPTION_SECRET = stringPreferencesKey("encryption_secret")
+        private val KEY_AUTO_SYNC_ENABLED = booleanPreferencesKey("auto_sync_enabled")
         private const val NULL_VERSION_ID = "00000000-0000-0000-0000-000000000000"
         private const val MAX_SYNC_RETRIES = 3
     }
 
     suspend fun getServerConfig(): SyncServerConfig? {
         val prefs = context.dataStore.data.first()
+        return getServerConfigFromPreferences(prefs)
+    }
+
+    private fun getServerConfigFromPreferences(
+        prefs: androidx.datastore.preferences.core.Preferences
+    ): SyncServerConfig? {
         val serverUrl = prefs[KEY_SERVER_URL]?.takeIf { it.isNotBlank() } ?: return null
         val clientId = prefs[KEY_CLIENT_ID]?.takeIf { it.isNotBlank() } ?: return null
         val secret = prefs[KEY_ENCRYPTION_SECRET]?.takeIf { it.isNotBlank() }
@@ -48,6 +56,19 @@ class SyncManager(
             prefs[KEY_SERVER_URL] = config.serverUrl
             prefs[KEY_CLIENT_ID] = config.clientId
             prefs[KEY_ENCRYPTION_SECRET] = config.encryptionSecret ?: ""
+        }
+    }
+
+    suspend fun isAutoSyncEnabled(): Boolean {
+        val prefs = context.dataStore.data.first()
+        val configured = getServerConfigFromPreferences(prefs) != null
+        val explicitPreference = prefs[KEY_AUTO_SYNC_ENABLED]
+        return explicitPreference ?: configured
+    }
+
+    suspend fun setAutoSyncEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_AUTO_SYNC_ENABLED] = enabled
         }
     }
 
