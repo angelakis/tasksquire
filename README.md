@@ -32,13 +32,13 @@ The sync protocol uses a version-based operation log:
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/v1/client/snapshot` | Fetch current snapshot |
-| POST | `/v1/client/snapshot` | Upload new snapshot |
-| GET | `/v1/client/add-version/{parent_version_id}` | Get operations since version |
+| POST | `/v1/client/add-snapshot/{version_id}` | Upload new snapshot |
+| GET | `/v1/client/get-child-version/{parent_version_id}` | Get child version |
 | POST | `/v1/client/add-version/{parent_version_id}` | Upload new operations |
 
 #### Authentication
 
-HTTP Basic Auth: username = Client ID (UUID), password = Encryption Secret.
+Client identity is sent via `X-Client-Id` (UUID). Payloads are encrypted client-side using the encryption secret.
 
 ### Sync Configuration
 

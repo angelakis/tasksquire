@@ -57,6 +57,7 @@ class SyncManager(
             prefs[KEY_CLIENT_ID] = config.clientId
             prefs[KEY_ENCRYPTION_SECRET] = config.encryptionSecret ?: ""
         }
+        log(SyncLogLevel.INFO, "Saved sync server config for ${config.serverUrl}")
     }
 
     suspend fun isAutoSyncEnabled(): Boolean {
@@ -70,6 +71,13 @@ class SyncManager(
         context.dataStore.edit { prefs ->
             prefs[KEY_AUTO_SYNC_ENABLED] = enabled
         }
+        log(SyncLogLevel.INFO, if (enabled) "Autosync enabled" else "Autosync disabled")
+    }
+
+    suspend fun getSyncLogs(): List<SyncLogEntry> = SyncLogStore.read(context)
+
+    suspend fun clearSyncLogs() {
+        SyncLogStore.clear(context)
     }
 
     private suspend fun getLastVersion(): String {
@@ -89,6 +97,7 @@ class SyncManager(
     suspend fun sync(): SyncResult = withContext(Dispatchers.IO) {
         val config = getServerConfig() ?: return@withContext SyncResult.NoServerConfigured
 
+        log(SyncLogLevel.INFO, "Starting sync with ${config.serverUrl}")
         val client = TaskChampionSyncClient(config)
         var retries = 0
 
@@ -96,15 +105,27 @@ class SyncManager(
             try {
                 val result = performSyncCycle(client)
                 if (result !is SyncResult.Error || retries >= MAX_SYNC_RETRIES - 1) {
+                    when (result) {
+                        is SyncResult.Success -> log(
+                            SyncLogLevel.INFO,
+                            "Sync complete: sent=${result.operationsSent}, received=${result.operationsApplied}"
+                        )
+                        is SyncResult.Error -> log(SyncLogLevel.ERROR, "Sync failed: ${result.message}")
+                        SyncResult.NoServerConfigured -> log(SyncLogLevel.WARN, "Sync skipped: no server configured")
+                        SyncResult.NotModified -> log(SyncLogLevel.INFO, "Sync not modified")
+                    }
                     return@withContext result
                 }
             } catch (e: SyncException) {
+                log(SyncLogLevel.ERROR, "Sync exception: ${e.message}")
                 if (retries >= MAX_SYNC_RETRIES - 1) {
                     return@withContext SyncResult.Error(e.message ?: "Sync failed", e)
                 }
             }
+            log(SyncLogLevel.WARN, "Retrying sync after conflict/error (attempt ${retries + 2}/$MAX_SYNC_RETRIES)")
             retries++
         }
+        log(SyncLogLevel.ERROR, "Sync failed: max retries exceeded")
         return@withContext SyncResult.Error("Max retries exceeded")
     }
 
@@ -113,6 +134,7 @@ class SyncManager(
 
         // If we have no version history, try to fetch a snapshot first
         if (lastVersion == NULL_VERSION_ID) {
+            log(SyncLogLevel.INFO, "No local sync version; fetching snapshot")
             val snapshot = try {
                 client.fetchSnapshot()
             } catch (e: SyncException) {
@@ -127,10 +149,14 @@ class SyncManager(
                 repository.upsertTasksFromSync(tasks)
                 lastVersion = snapshot.versionId
                 saveLastVersion(lastVersion)
+                log(SyncLogLevel.INFO, "Applied snapshot with ${tasks.size} tasks")
+            } else {
+                log(SyncLogLevel.INFO, "No snapshot on server")
             }
         }
 
         // Fetch operations from server since our last version
+        log(SyncLogLevel.INFO, "Fetching server operations since $lastVersion")
         val serverOps = try {
             client.getOperationsSince(lastVersion)
         } catch (e: SyncException) {
@@ -144,17 +170,22 @@ class SyncManager(
             serverOperationsApplied = operations.size
             lastVersion = newVersionId
             saveLastVersion(lastVersion)
+            log(SyncLogLevel.INFO, "Applied $serverOperationsApplied server operations")
+        } else {
+            log(SyncLogLevel.INFO, "No child version found for $lastVersion")
         }
 
         // Build operations from local modifications
         val modifiedTasks = repository.getModifiedTasks()
         val localOps = buildLocalOperations(modifiedTasks)
+        log(SyncLogLevel.INFO, "Prepared ${localOps.size} local operations from ${modifiedTasks.size} modified tasks")
 
         if (localOps.isEmpty()) {
             return SyncResult.Success(serverOperationsApplied, 0)
         }
 
         // Upload local operations
+        log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
         val newVersionId = try {
             client.uploadOperations(lastVersion, localOps)
         } catch (e: SyncException) {
@@ -163,6 +194,7 @@ class SyncManager(
 
         if (newVersionId == null) {
             // Conflict - retry
+            log(SyncLogLevel.WARN, "Version conflict during upload")
             return SyncResult.Error("Version conflict, retrying...")
         }
 
@@ -293,8 +325,14 @@ class SyncManager(
             }
             val snapshot = Snapshot(versionId = versionId, tasks = taskMap)
             client.uploadSnapshot(snapshot)
+            log(SyncLogLevel.INFO, "Uploaded snapshot with ${allTasks.size} tasks")
         } catch (e: Exception) {
             // Snapshot upload failure is non-fatal; sync already succeeded
+            log(SyncLogLevel.WARN, "Snapshot upload failed: ${e.message}")
         }
+    }
+
+    private suspend fun log(level: SyncLogLevel, message: String) {
+        SyncLogStore.append(context, level, message)
     }
 }

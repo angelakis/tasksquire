@@ -10,6 +10,7 @@ import com.taskwarrior.android.data.TaskPriority
 import com.taskwarrior.android.data.TaskRepository
 import com.taskwarrior.android.data.TaskStatus
 import com.taskwarrior.android.sync.AutoSyncScheduler
+import com.taskwarrior.android.sync.SyncLogEntry
 import com.taskwarrior.android.sync.SyncManager
 import com.taskwarrior.android.sync.SyncResult
 import com.taskwarrior.android.sync.SyncServerConfig
@@ -243,10 +244,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _autoSyncEnabled = MutableStateFlow(false)
     val autoSyncEnabled: StateFlow<Boolean> = _autoSyncEnabled.asStateFlow()
 
+    private val _syncLogs = MutableStateFlow<List<SyncLogEntry>>(emptyList())
+    val syncLogs: StateFlow<List<SyncLogEntry>> = _syncLogs.asStateFlow()
+
     init {
         viewModelScope.launch {
             _syncConfig.value = syncManager.getServerConfig()
             _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
+            _syncLogs.value = syncManager.getSyncLogs()
             AutoSyncScheduler.schedulePeriodicSync(application, _autoSyncEnabled.value)
         }
     }
@@ -371,6 +376,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.value = UiState.Syncing
             val result = syncManager.sync()
+            _syncLogs.value = syncManager.getSyncLogs()
             _uiState.value = when (result) {
                 is SyncResult.Success ->
                     UiState.SyncSuccess("Sync complete: ${result.operationsSent} sent, ${result.operationsApplied} received")
@@ -383,8 +389,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     fun saveSyncConfig(serverUrl: String, clientId: String, secret: String) {
         viewModelScope.launch {
-            val config = SyncServerConfig(serverUrl, clientId, secret.takeIf { it.isNotBlank() })
+            val normalizedServerUrl = serverUrl.trim()
+            val normalizedClientId = clientId.trim()
+            val normalizedSecret = secret.trim().takeIf { it.isNotBlank() }
+            val uuidRegex = Regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+            if (!uuidRegex.matches(normalizedClientId)) {
+                _uiState.value = UiState.Error("Client ID must be a UUID")
+                return@launch
+            }
+            val config = SyncServerConfig(normalizedServerUrl, normalizedClientId, normalizedSecret)
             syncManager.saveServerConfig(config)
+            _syncLogs.value = syncManager.getSyncLogs()
             _syncConfig.value = config
             _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
             AutoSyncScheduler.schedulePeriodicSync(getApplication(), _autoSyncEnabled.value)
@@ -398,11 +413,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun setAutoSyncEnabled(enabled: Boolean) {
         viewModelScope.launch {
             syncManager.setAutoSyncEnabled(enabled)
+            _syncLogs.value = syncManager.getSyncLogs()
             _autoSyncEnabled.value = syncManager.isAutoSyncEnabled()
             AutoSyncScheduler.schedulePeriodicSync(getApplication(), _autoSyncEnabled.value)
             _uiState.value = UiState.SyncSuccess(
                 if (_autoSyncEnabled.value) "Autosync enabled" else "Autosync disabled"
             )
+        }
+    }
+
+    fun refreshSyncLogs() {
+        viewModelScope.launch {
+            _syncLogs.value = syncManager.getSyncLogs()
+        }
+    }
+
+    fun clearSyncLogs() {
+        viewModelScope.launch {
+            syncManager.clearSyncLogs()
+            _syncLogs.value = emptyList()
+            _uiState.value = UiState.SyncSuccess("Sync logs cleared")
         }
     }
 

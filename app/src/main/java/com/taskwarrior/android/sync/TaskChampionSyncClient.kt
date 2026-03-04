@@ -1,25 +1,26 @@
 package com.taskwarrior.android.sync
 
-import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
- * HTTP client for the TaskChampion sync protocol.
+ * HTTP client for taskchampion-sync-server protocol.
  *
- * The TaskChampion sync server exposes these endpoints:
+ * Endpoints:
  *   GET  /v1/client/snapshot                       - fetch current snapshot
- *   POST /v1/client/snapshot                       - upload snapshot
- *   GET  /v1/client/add-version/{parent_version_id} - get operations since version
+ *   POST /v1/client/add-snapshot/{version_id}      - upload snapshot
+ *   GET  /v1/client/get-child-version/{parent_version_id} - get child version
  *   POST /v1/client/add-version/{parent_version_id} - upload new operations
- *
- * Authentication is done via HTTP Basic Auth using the client_id as the
- * username and the encryption_secret as the password.
  */
 class TaskChampionSyncClient(private val config: SyncServerConfig) {
+    companion object {
+        private const val HISTORY_SEGMENT_CONTENT_TYPE = "application/vnd.taskchampion.history-segment"
+        private const val SNAPSHOT_CONTENT_TYPE = "application/vnd.taskchampion.snapshot"
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -27,19 +28,15 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         .writeTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
-
     private val baseUrl: String = config.serverUrl.trimEnd('/')
+    private val cryptor = TaskChampionCryptor(config.clientId, config.encryptionSecret)
+    private val historyContentType = HISTORY_SEGMENT_CONTENT_TYPE.toMediaType()
+    private val snapshotContentType = SNAPSHOT_CONTENT_TYPE.toMediaType()
 
     private fun buildRequest(url: String): Request.Builder {
-        val builder = Request.Builder().url(url)
-        if (config.encryptionSecret != null) {
-            val credentials = okhttp3.Credentials.basic(config.clientId, config.encryptionSecret)
-            builder.addHeader("Authorization", credentials)
-        } else {
-            builder.addHeader("X-Client-Id", config.clientId)
-        }
-        return builder
+        return Request.Builder()
+            .url(url)
+            .addHeader("X-Client-Id", config.clientId)
     }
 
     /**
@@ -57,12 +54,14 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         return response.use { resp ->
             when (resp.code) {
                 200 -> {
-                    val body = resp.body?.string() ?: throw SyncException("Empty snapshot response")
-                    JsonSerializer.snapshotFromJson(body)
+                    val versionId = requiredUuidHeader(resp, "X-Version-Id")
+                    requireContentType(resp, SNAPSHOT_CONTENT_TYPE, "fetching snapshot")
+                    val body = resp.body?.bytes() ?: throw SyncException("Empty snapshot response")
+                    val snapshotBytes = cryptor.unseal(versionId, body)
+                    TaskChampionCodec.decodeSnapshot(versionId, snapshotBytes)
                 }
                 404 -> null
-                401 -> throw SyncException("Authentication failed (401)")
-                else -> throw SyncException("Unexpected status ${resp.code} fetching snapshot")
+                else -> throw SyncException(unexpectedStatusMessage(resp.code, "fetching snapshot", resp.body?.string()))
             }
         }
     }
@@ -71,9 +70,14 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
      * Upload a new snapshot to the server.
      */
     suspend fun uploadSnapshot(snapshot: Snapshot) {
-        val url = "$baseUrl/v1/client/snapshot"
-        val body = JsonSerializer.snapshotToJson(snapshot).toRequestBody(jsonMediaType)
-        val request = buildRequest(url).post(body).build()
+        val url = "$baseUrl/v1/client/add-snapshot/${snapshot.versionId}"
+        val payload = TaskChampionCodec.encodeSnapshot(snapshot)
+        val sealed = cryptor.seal(snapshot.versionId, payload)
+        val requestBody = sealed.toRequestBody(snapshotContentType)
+        val request = buildRequest(url)
+            .addHeader("Content-Type", SNAPSHOT_CONTENT_TYPE)
+            .post(requestBody)
+            .build()
         val response = try {
             httpClient.newCall(request).execute()
         } catch (e: IOException) {
@@ -81,17 +85,17 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         }
         response.use { resp ->
             if (resp.code !in 200..299) {
-                throw SyncException("Unexpected status ${resp.code} uploading snapshot")
+                throw SyncException(unexpectedStatusMessage(resp.code, "uploading snapshot", resp.body?.string()))
             }
         }
     }
 
     /**
-     * Get operations since the given parent version.
-     * Returns (newVersionId, operations) or null if the parent version is unknown (404).
+     * Get child version for the given parent version.
+     * Returns (newVersionId, operations) or null when no child exists (404).
      */
     suspend fun getOperationsSince(parentVersionId: String): Pair<String, List<Operation>>? {
-        val url = "$baseUrl/v1/client/add-version/$parentVersionId"
+        val url = "$baseUrl/v1/client/get-child-version/$parentVersionId"
         val request = buildRequest(url).get().build()
         val response = try {
             httpClient.newCall(request).execute()
@@ -101,12 +105,14 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         return response.use { resp ->
             when (resp.code) {
                 200 -> {
-                    val body = resp.body?.string() ?: throw SyncException("Empty operations response")
-                    JsonSerializer.versionResponseFromJson(body)
+                    val versionId = requiredUuidHeader(resp, "X-Version-Id")
+                    requireContentType(resp, HISTORY_SEGMENT_CONTENT_TYPE, "fetching operations")
+                    val body = resp.body?.bytes() ?: throw SyncException("Empty operations response")
+                    val historySegment = cryptor.unseal(parentVersionId, body)
+                    versionId to TaskChampionCodec.decodeHistorySegment(historySegment)
                 }
                 404 -> null
-                401 -> throw SyncException("Authentication failed (401)")
-                else -> throw SyncException("Unexpected status ${resp.code} fetching operations")
+                else -> throw SyncException(unexpectedStatusMessage(resp.code, "fetching operations", resp.body?.string()))
             }
         }
     }
@@ -117,8 +123,13 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
      */
     suspend fun uploadOperations(parentVersionId: String, operations: List<Operation>): String? {
         val url = "$baseUrl/v1/client/add-version/$parentVersionId"
-        val body = JsonSerializer.operationsToJson(operations).toRequestBody(jsonMediaType)
-        val request = buildRequest(url).post(body).build()
+        val historySegment = TaskChampionCodec.encodeHistorySegment(operations)
+        val sealed = cryptor.seal(parentVersionId, historySegment)
+        val body = sealed.toRequestBody(historyContentType)
+        val request = buildRequest(url)
+            .addHeader("Content-Type", HISTORY_SEGMENT_CONTENT_TYPE)
+            .post(body)
+            .build()
         val response = try {
             httpClient.newCall(request).execute()
         } catch (e: IOException) {
@@ -126,15 +137,43 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         }
         return response.use { resp ->
             when (resp.code) {
-                200 -> {
-                    val responseBody = resp.body?.string() ?: throw SyncException("Empty version response")
-                    val (newVersionId, _) = JsonSerializer.versionResponseFromJson(responseBody)
-                    newVersionId
-                }
+                200 -> requiredUuidHeader(resp, "X-Version-Id")
                 409 -> null // Conflict - another client pushed first
-                401 -> throw SyncException("Authentication failed (401)")
-                else -> throw SyncException("Unexpected status ${resp.code} uploading operations")
+                else -> throw SyncException(unexpectedStatusMessage(resp.code, "uploading operations", resp.body?.string()))
             }
+        }
+    }
+
+    private fun requiredUuidHeader(resp: okhttp3.Response, name: String): String {
+        val value = resp.header(name)?.trim()
+            ?: throw SyncException("Response missing required header $name")
+        return try {
+            java.util.UUID.fromString(value)
+            value
+        } catch (e: Exception) {
+            throw SyncException("Response header $name is not a valid UUID: $value", e)
+        }
+    }
+
+    private fun requireContentType(resp: okhttp3.Response, expected: String, action: String) {
+        val contentType = resp.header("Content-Type")?.substringBefore(";")?.trim()?.lowercase()
+        if (contentType != expected.lowercase()) {
+            throw SyncException(
+                "Unexpected content-type '${resp.header("Content-Type")}' while $action (expected $expected)"
+            )
+        }
+    }
+
+    private fun unexpectedStatusMessage(code: Int, action: String, body: String?): String {
+        val bodySnippet = body
+            ?.replace('\n', ' ')
+            ?.trim()
+            ?.take(300)
+            ?.takeIf { it.isNotBlank() }
+        return if (bodySnippet != null) {
+            "Unexpected status $code $action. Server response: $bodySnippet"
+        } else {
+            "Unexpected status $code $action"
         }
     }
 }

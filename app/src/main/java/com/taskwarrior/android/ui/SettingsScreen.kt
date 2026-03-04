@@ -8,6 +8,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -18,7 +19,11 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.taskwarrior.android.sync.SyncLogEntry
 import com.taskwarrior.android.sync.SyncServerConfig
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -30,6 +35,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val existingConfig by viewModel.syncConfig.collectAsState()
     val autoSyncEnabled by viewModel.autoSyncEnabled.collectAsState()
+    val syncLogs by viewModel.syncLogs.collectAsState()
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -51,6 +57,11 @@ fun SettingsScreen(
         mutableStateOf(existingConfig?.encryptionSecret ?: "")
     }
     var showSecret by remember { mutableStateOf(false) }
+    val timeFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US) }
+
+    LaunchedEffect(Unit) {
+        viewModel.refreshSyncLogs()
+    }
 
     Scaffold(
         topBar = {
@@ -79,8 +90,8 @@ fun SettingsScreen(
 
             Text(
                 text = "Configure a TaskChampion-compatible sync server. " +
-                    "The server uses HTTP Basic Auth with your Client ID and " +
-                    "Encryption Secret.",
+                    "Requests identify this client using X-Client-Id and payloads are " +
+                    "encrypted with your Encryption Secret.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -196,6 +207,64 @@ fun SettingsScreen(
             HorizontalDivider()
 
             Text(
+                text = "Sync Logs",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Text(
+                text = "Use this when troubleshooting sync failures. Most recent entries appear first.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { viewModel.refreshSyncLogs() },
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Icon(Icons.Filled.Refresh, contentDescription = "Refresh logs")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Refresh Logs")
+                }
+                OutlinedButton(
+                    onClick = { viewModel.clearSyncLogs() },
+                    modifier = Modifier.weight(1f),
+                    enabled = syncLogs.isNotEmpty()
+                ) {
+                    Text("Clear Logs")
+                }
+            }
+
+            Surface(
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    if (syncLogs.isEmpty()) {
+                        Text(
+                            text = "No sync logs yet.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        syncLogs.asReversed().take(40).forEach { entry ->
+                            SyncLogRow(entry = entry, timeFormat = timeFormat)
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+
+            HorizontalDivider()
+
+            Text(
                 text = "About",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary
@@ -211,5 +280,25 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
+    }
+}
+
+@Composable
+private fun SyncLogRow(entry: SyncLogEntry, timeFormat: SimpleDateFormat) {
+    val levelColor = when (entry.level) {
+        com.taskwarrior.android.sync.SyncLogLevel.ERROR -> MaterialTheme.colorScheme.error
+        com.taskwarrior.android.sync.SyncLogLevel.WARN -> MaterialTheme.colorScheme.tertiary
+        com.taskwarrior.android.sync.SyncLogLevel.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(
+            text = "${timeFormat.format(Date(entry.timestamp))}  ${entry.level}",
+            style = MaterialTheme.typography.labelSmall,
+            color = levelColor
+        )
+        Text(
+            text = entry.message,
+            style = MaterialTheme.typography.bodySmall
+        )
     }
 }
