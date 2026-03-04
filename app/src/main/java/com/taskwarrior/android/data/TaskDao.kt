@@ -52,4 +52,10 @@ interface TaskDao {
 
     @Query("SELECT DISTINCT project FROM tasks WHERE project IS NOT NULL AND status = 'PENDING'")
     fun observeProjects(): Flow<List<String>>
+
+    @Query("SELECT DISTINCT tags FROM tasks WHERE tags IS NOT NULL AND tags != '' AND status = 'PENDING'")
+    fun observeTagStrings(): Flow<List<String>>
+
+    @Query("SELECT * FROM tasks WHERE (status = 'PENDING' OR status = 'WAITING') AND description LIKE '%' || :query || '%'")
+    fun searchPendingTasks(query: String): Flow<List<Task>>
 }

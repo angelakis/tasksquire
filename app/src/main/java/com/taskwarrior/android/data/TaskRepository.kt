@@ -7,6 +7,7 @@ class TaskRepository(private val taskDao: TaskDao) {
     fun observePendingTasks(): Flow<List<Task>> = taskDao.observePendingTasks()
     fun observeCompletedTasks(): Flow<List<Task>> = taskDao.observeCompletedTasks()
     fun observeProjects(): Flow<List<String>> = taskDao.observeProjects()
+    fun observeTagStrings(): Flow<List<String>> = taskDao.observeTagStrings()
 
     suspend fun getTaskByUuid(uuid: String): Task? = taskDao.getTaskByUuid(uuid)
     suspend fun getModifiedTasks(): List<Task> = taskDao.getModifiedTasks()

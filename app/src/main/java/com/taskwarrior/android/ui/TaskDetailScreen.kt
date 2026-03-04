@@ -127,7 +127,21 @@ fun TaskDetailScreen(
                 DetailRow("Scheduled", dateStr)
             }
 
-            task.recur?.let { DetailRow("Recur", it) }
+            task.recur?.let {
+                DetailRow("Recurrence", it)
+                if (task.status == TaskStatus.PENDING) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        Text(
+                            text = "Recurring task",
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            style = MaterialTheme.typography.labelSmall
+                        )
+                    }
+                }
+            }
 
             HorizontalDivider()
 
