@@ -1,5 +1,7 @@
 package com.taskwarrior.android.ui
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -11,6 +13,7 @@ import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -24,7 +27,18 @@ fun SettingsScreen(
     viewModel: TaskViewModel,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
     val existingConfig by viewModel.syncConfig.collectAsState()
+
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        if (uri != null) {
+            context.contentResolver.openInputStream(uri)?.let { stream ->
+                viewModel.importTasksFromJson(stream)
+            }
+        }
+    }
 
     var serverUrl by remember(existingConfig) {
         mutableStateOf(existingConfig?.serverUrl ?: "")
@@ -125,6 +139,28 @@ fun SettingsScreen(
                 ) {
                     Text("Save")
                 }
+            }
+
+            HorizontalDivider()
+
+            Text(
+                text = "Import / Export",
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Text(
+                text = "Import tasks from a Taskwarrior JSON export file. " +
+                    "Generate one with: task export > tasks.json",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Button(
+                onClick = { filePickerLauncher.launch("application/json") },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Import from JSON")
             }
 
             HorizontalDivider()

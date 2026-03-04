@@ -5,11 +5,13 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.taskwarrior.android.data.Task
 import com.taskwarrior.android.data.TaskDatabase
+import com.taskwarrior.android.data.TaskImporter
 import com.taskwarrior.android.data.TaskPriority
 import com.taskwarrior.android.data.TaskRepository
 import com.taskwarrior.android.sync.SyncManager
 import com.taskwarrior.android.sync.SyncResult
 import com.taskwarrior.android.sync.SyncServerConfig
+import java.io.InputStream
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -182,6 +184,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             syncManager.saveServerConfig(config)
             _syncConfig.value = config
             _uiState.value = UiState.SyncSuccess("Settings saved")
+        }
+    }
+
+    fun importTasksFromJson(inputStream: InputStream) {
+        viewModelScope.launch {
+            _uiState.value = UiState.Syncing
+            try {
+                val json = inputStream.bufferedReader().use { it.readText() }
+                TaskImporter.parse(json).fold(
+                    onSuccess = { tasks ->
+                        repository.importTasks(tasks)
+                        _uiState.value = UiState.SyncSuccess("Imported ${tasks.size} tasks")
+                    },
+                    onFailure = { e ->
+                        _uiState.value = UiState.Error("Import failed: ${e.message}")
+                    }
+                )
+            } catch (e: Exception) {
+                _uiState.value = UiState.Error("Import failed: ${e.message}")
+            }
         }
     }
 

@@ -33,6 +33,10 @@ class TaskRepository(private val taskDao: TaskDao) {
         taskDao.markTaskSynced(uuid)
     }
 
+    suspend fun importTasks(tasks: List<Task>) {
+        taskDao.insertTasks(tasks)
+    }
+
     suspend fun upsertTasksFromSync(tasks: List<Task>) {
         taskDao.insertTasks(tasks.map { it.copy(isSynced = true, isModifiedLocally = false) })
     }
