@@ -1,0 +1,278 @@
+package com.taskwarrior.android.sync
+
+import android.content.Context
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
+import com.taskwarrior.android.data.Task
+import com.taskwarrior.android.data.TaskRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
+
+val Context.dataStore by preferencesDataStore(name = "sync_prefs")
+
+/**
+ * Coordinates sync between the local database and the TaskChampion sync server.
+ *
+ * Sync Algorithm:
+ * 1. Load local modified tasks and build operations
+ * 2. Fetch operations from server since last known version
+ * 3. Apply server operations to local DB
+ * 4. Upload local operations to server
+ * 5. If upload conflicts (409), retry from step 2 (up to 3 times)
+ */
+class SyncManager(
+    private val context: Context,
+    private val repository: TaskRepository
+) {
+    companion object {
+        private val KEY_LAST_VERSION = stringPreferencesKey("last_sync_version")
+        private val KEY_SERVER_URL = stringPreferencesKey("server_url")
+        private val KEY_CLIENT_ID = stringPreferencesKey("client_id")
+        private val KEY_ENCRYPTION_SECRET = stringPreferencesKey("encryption_secret")
+        private const val NULL_VERSION_ID = "00000000-0000-0000-0000-000000000000"
+        private const val MAX_SYNC_RETRIES = 3
+    }
+
+    suspend fun getServerConfig(): SyncServerConfig? {
+        val prefs = context.dataStore.data.first()
+        val serverUrl = prefs[KEY_SERVER_URL]?.takeIf { it.isNotBlank() } ?: return null
+        val clientId = prefs[KEY_CLIENT_ID]?.takeIf { it.isNotBlank() } ?: return null
+        val secret = prefs[KEY_ENCRYPTION_SECRET]?.takeIf { it.isNotBlank() }
+        return SyncServerConfig(serverUrl, clientId, secret)
+    }
+
+    suspend fun saveServerConfig(config: SyncServerConfig) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SERVER_URL] = config.serverUrl
+            prefs[KEY_CLIENT_ID] = config.clientId
+            prefs[KEY_ENCRYPTION_SECRET] = config.encryptionSecret ?: ""
+        }
+    }
+
+    private suspend fun getLastVersion(): String {
+        val prefs = context.dataStore.data.first()
+        return prefs[KEY_LAST_VERSION] ?: NULL_VERSION_ID
+    }
+
+    private suspend fun saveLastVersion(versionId: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_VERSION] = versionId
+        }
+    }
+
+    /**
+     * Perform a full sync cycle.
+     */
+    suspend fun sync(): SyncResult = withContext(Dispatchers.IO) {
+        val config = getServerConfig() ?: return@withContext SyncResult.NoServerConfigured
+
+        val client = TaskChampionSyncClient(config)
+        var retries = 0
+
+        while (retries < MAX_SYNC_RETRIES) {
+            try {
+                val result = performSyncCycle(client)
+                if (result !is SyncResult.Error || retries >= MAX_SYNC_RETRIES - 1) {
+                    return@withContext result
+                }
+            } catch (e: SyncException) {
+                if (retries >= MAX_SYNC_RETRIES - 1) {
+                    return@withContext SyncResult.Error(e.message ?: "Sync failed", e)
+                }
+            }
+            retries++
+        }
+        return@withContext SyncResult.Error("Max retries exceeded")
+    }
+
+    private suspend fun performSyncCycle(client: TaskChampionSyncClient): SyncResult {
+        var lastVersion = getLastVersion()
+
+        // If we have no version history, try to fetch a snapshot first
+        if (lastVersion == NULL_VERSION_ID) {
+            val snapshot = try {
+                client.fetchSnapshot()
+            } catch (e: SyncException) {
+                return SyncResult.Error("Failed to fetch snapshot: ${e.message}", e)
+            }
+
+            if (snapshot != null) {
+                // Apply snapshot to local DB
+                val tasks = snapshot.tasks.mapNotNull { (uuid, props) ->
+                    OperationBuilder.taskFromProperties(uuid, props)
+                }
+                repository.upsertTasksFromSync(tasks)
+                lastVersion = snapshot.versionId
+                saveLastVersion(lastVersion)
+            }
+        }
+
+        // Fetch operations from server since our last version
+        val serverOps = try {
+            client.getOperationsSince(lastVersion)
+        } catch (e: SyncException) {
+            return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
+        }
+
+        var serverOperationsApplied = 0
+        if (serverOps != null) {
+            val (newVersionId, operations) = serverOps
+            applyOperationsToLocal(operations)
+            serverOperationsApplied = operations.size
+            lastVersion = newVersionId
+            saveLastVersion(lastVersion)
+        }
+
+        // Build operations from local modifications
+        val modifiedTasks = repository.getModifiedTasks()
+        val localOps = buildLocalOperations(modifiedTasks)
+
+        if (localOps.isEmpty()) {
+            return SyncResult.Success(serverOperationsApplied, 0)
+        }
+
+        // Upload local operations
+        val newVersionId = try {
+            client.uploadOperations(lastVersion, localOps)
+        } catch (e: SyncException) {
+            return SyncResult.Error("Failed to upload operations: ${e.message}", e)
+        }
+
+        if (newVersionId == null) {
+            // Conflict - retry
+            return SyncResult.Error("Version conflict, retrying...")
+        }
+
+        // Mark all uploaded tasks as synced
+        for (task in modifiedTasks) {
+            repository.markTaskSynced(task.uuid)
+        }
+        saveLastVersion(newVersionId)
+
+        // Periodically upload a snapshot (every 50 operations approx)
+        if (localOps.size > 20) {
+            uploadSnapshot(client, newVersionId)
+        }
+
+        return SyncResult.Success(serverOperationsApplied, localOps.size)
+    }
+
+    private suspend fun applyOperationsToLocal(operations: List<Operation>) {
+        for (op in operations) {
+            when (op) {
+                is Operation.Create -> {
+                    // Will be populated by subsequent Update operations
+                    val existing = repository.getTaskByUuid(op.uuid)
+                    if (existing == null) {
+                        // Placeholder - will be filled in by Update ops
+                    }
+                }
+                is Operation.Update -> {
+                    val existing = repository.getTaskByUuid(op.uuid)
+                    if (existing != null) {
+                        val updated = applyUpdateToTask(existing, op)
+                        repository.upsertTasksFromSync(listOf(updated))
+                    }
+                    // If task doesn't exist yet, it will be created by the Create op
+                    // or we need to batch all ops for the same UUID together
+                }
+                is Operation.Delete -> {
+                    repository.deleteTask(op.uuid)
+                }
+            }
+        }
+
+        // Second pass: handle tasks that were created then updated in the same batch
+        val createdUuids = operations.filterIsInstance<Operation.Create>().map { it.uuid }
+        if (createdUuids.isNotEmpty()) {
+            val updatesByUuid = operations
+                .filterIsInstance<Operation.Update>()
+                .filter { it.uuid in createdUuids }
+                .groupBy { it.uuid }
+
+            for (uuid in createdUuids) {
+                val existing = repository.getTaskByUuid(uuid)
+                if (existing == null) {
+                    val props = mutableMapOf<String, String>()
+                    for (update in updatesByUuid[uuid] ?: emptyList()) {
+                        if (update.value != null) {
+                            props[update.property] = update.value
+                        }
+                    }
+                    val task = OperationBuilder.taskFromProperties(uuid, props)
+                    if (task != null) {
+                        repository.upsertTasksFromSync(listOf(task))
+                    }
+                }
+            }
+        }
+    }
+
+    private fun applyUpdateToTask(task: Task, op: Operation.Update): Task {
+        return when (op.property) {
+            "description" -> task.copy(description = op.value ?: task.description)
+            "status" -> task.copy(status = when (op.value?.lowercase()) {
+                "pending" -> com.taskwarrior.android.data.TaskStatus.PENDING
+                "completed" -> com.taskwarrior.android.data.TaskStatus.COMPLETED
+                "deleted" -> com.taskwarrior.android.data.TaskStatus.DELETED
+                "waiting" -> com.taskwarrior.android.data.TaskStatus.WAITING
+                else -> task.status
+            })
+            "priority" -> task.copy(priority = when (op.value?.uppercase()) {
+                "H" -> com.taskwarrior.android.data.TaskPriority.HIGH
+                "M" -> com.taskwarrior.android.data.TaskPriority.MEDIUM
+                "L" -> com.taskwarrior.android.data.TaskPriority.LOW
+                else -> com.taskwarrior.android.data.TaskPriority.NONE
+            })
+            "project" -> task.copy(project = op.value)
+            "due" -> task.copy(due = op.value?.toLongOrNull())
+            "wait" -> task.copy(wait = op.value?.toLongOrNull())
+            "scheduled" -> task.copy(scheduled = op.value?.toLongOrNull())
+            "recur" -> task.copy(recur = op.value)
+            "modified" -> task.copy(modified = op.value?.toLongOrNull() ?: task.modified)
+            else -> {
+                if (op.property.startsWith("tag.")) {
+                    val tag = op.property.removePrefix("tag.")
+                    val tags = task.getTagList().toMutableList()
+                    if (op.value != null) {
+                        if (!tags.contains(tag)) tags.add(tag)
+                    } else {
+                        tags.remove(tag)
+                    }
+                    task.withTagList(tags)
+                } else {
+                    task
+                }
+            }
+        }
+    }
+
+    private fun buildLocalOperations(tasks: List<Task>): List<Operation> {
+        val ops = mutableListOf<Operation>()
+        for (task in tasks) {
+            if (!task.isSynced) {
+                // New task - send Create + Updates
+                ops.addAll(OperationBuilder.buildCreateOperations(task))
+            } else {
+                // Existing task - send Updates
+                ops.addAll(OperationBuilder.buildUpdateOperations(task))
+            }
+        }
+        return ops
+    }
+
+    private suspend fun uploadSnapshot(client: TaskChampionSyncClient, versionId: String) {
+        try {
+            val allTasks = repository.getAllTasks()
+            val taskMap = allTasks.associate { task ->
+                task.uuid to OperationBuilder.taskToProperties(task)
+            }
+            val snapshot = Snapshot(versionId = versionId, tasks = taskMap)
+            client.uploadSnapshot(snapshot)
+        } catch (e: Exception) {
+            // Snapshot upload failure is non-fatal; sync already succeeded
+        }
+    }
+}
