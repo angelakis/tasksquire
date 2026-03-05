@@ -111,7 +111,12 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
                     val historySegment = cryptor.unseal(parentVersionId, body)
                     versionId to TaskChampionCodec.decodeHistorySegment(historySegment)
                 }
-                404 -> null
+                404 -> null // Client is up-to-date; no new versions exist
+                410 -> throw SyncVersionNotFoundException(
+                    // Version has been pruned/expired from the server. Caller must reset
+                    // local sync state and re-initialise from a fresh snapshot.
+                    "Version $parentVersionId is gone from server (410); local sync state is stale"
+                )
                 else -> throw SyncException(unexpectedStatusMessage(resp.code, "fetching operations", resp.body?.string()))
             }
         }
@@ -119,9 +124,10 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
 
     /**
      * Upload new operations to the server.
-     * Returns the new version ID on success, or null on conflict (409 - another client pushed first).
+     * Returns an [UploadResult] on success (may signal a snapshot request), or null on conflict
+     * (409 - another client pushed first).
      */
-    suspend fun uploadOperations(parentVersionId: String, operations: List<Operation>): String? {
+    suspend fun uploadOperations(parentVersionId: String, operations: List<Operation>): UploadResult? {
         val url = "$baseUrl/v1/client/add-version/$parentVersionId"
         val historySegment = TaskChampionCodec.encodeHistorySegment(operations)
         val sealed = cryptor.seal(parentVersionId, historySegment)
@@ -137,7 +143,13 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         }
         return response.use { resp ->
             when (resp.code) {
-                200 -> requiredUuidHeader(resp, "X-Version-Id")
+                200 -> {
+                    val versionId = requiredUuidHeader(resp, "X-Version-Id")
+                    // The server may request a snapshot via X-Snapshot-Request: low|high.
+                    // Mobile clients should at minimum honour "high" urgency.
+                    val snapshotUrgency = resp.header("X-Snapshot-Request")?.trim()?.lowercase()
+                    UploadResult(versionId, snapshotUrgency)
+                }
                 409 -> null // Conflict - another client pushed first
                 else -> {
                     val bodyText = resp.body?.string()
@@ -186,6 +198,16 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
         }
     }
 }
+
+/**
+ * Result returned by [TaskChampionSyncClient.uploadOperations] on HTTP 200.
+ *
+ * @param newVersionId The new version ID assigned by the server.
+ * @param snapshotUrgency Value of the `X-Snapshot-Request` header if present (`"low"` or
+ *   `"high"`), or null if the server did not request a snapshot. Mobile clients should upload
+ *   a snapshot at least when urgency is `"high"`.
+ */
+data class UploadResult(val newVersionId: String, val snapshotUrgency: String?)
 
 class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
