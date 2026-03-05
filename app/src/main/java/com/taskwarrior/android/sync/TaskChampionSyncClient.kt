@@ -139,7 +139,16 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
             when (resp.code) {
                 200 -> requiredUuidHeader(resp, "X-Version-Id")
                 409 -> null // Conflict - another client pushed first
-                else -> throw SyncException(unexpectedStatusMessage(resp.code, "uploading operations", resp.body?.string()))
+                else -> {
+                    val bodyText = resp.body?.string()
+                    val message = unexpectedStatusMessage(resp.code, "uploading operations", bodyText)
+                    if (resp.code == 500) {
+                        // Server doesn't recognize our parent version (e.g. server was reset).
+                        // Throw a specific exception so the caller can reset local version state.
+                        throw SyncVersionNotFoundException(message)
+                    }
+                    throw SyncException(message)
+                }
             }
         }
     }
@@ -179,3 +188,10 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
 }
 
 class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
+
+/**
+ * Thrown when the server does not recognize the parent version ID we sent.
+ * This typically means the server has been reset or the local version state is stale.
+ * The caller should reset its stored version and re-sync from scratch.
+ */
+class SyncVersionNotFoundException(message: String, cause: Throwable? = null) : SyncException(message, cause)

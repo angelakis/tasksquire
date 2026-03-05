@@ -194,6 +194,12 @@ class SyncManager(
         log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
         val newVersionId = try {
             client.uploadOperations(lastVersion, localOps)
+        } catch (e: SyncVersionNotFoundException) {
+            // Server doesn't know our parent version — reset local state so the next
+            // retry starts from scratch (fetches a fresh snapshot).
+            log(SyncLogLevel.WARN, "Server does not recognise version $lastVersion, resetting sync state")
+            saveLastVersion(NULL_VERSION_ID)
+            return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
         } catch (e: SyncException) {
             return SyncResult.Error("Failed to upload operations: ${e.message}", e)
         }
