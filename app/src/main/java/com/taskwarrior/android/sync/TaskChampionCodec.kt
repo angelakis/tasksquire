@@ -71,13 +71,18 @@ object TaskChampionCodec {
     }
 
     fun encodeSnapshot(snapshot: Snapshot): ByteArray {
-        val json = JSONObject()
+        // TaskChampion Rust expects Vec<(Uuid, TaskMap)> which serde deserializes
+        // from a JSON array of [uuid, {properties}] tuples, NOT a JSON object.
+        val json = JSONArray()
         for ((uuid, props) in snapshot.tasks) {
             val taskObj = JSONObject()
             for ((k, v) in props) {
                 taskObj.put(k, v)
             }
-            json.put(uuid, taskObj)
+            val entry = JSONArray()
+            entry.put(uuid)
+            entry.put(taskObj)
+            json.put(entry)
         }
         val raw = json.toString().toByteArray(Charsets.UTF_8)
         val baos = ByteArrayOutputStream()
@@ -88,19 +93,38 @@ object TaskChampionCodec {
     fun decodeSnapshot(versionId: String, bytes: ByteArray): Snapshot {
         val inflater = InflaterInputStream(ByteArrayInputStream(bytes))
         val decompressed = inflater.readBytes().toString(Charsets.UTF_8)
-        val json = JSONObject(decompressed)
         val tasks = mutableMapOf<String, Map<String, String>>()
-        val keys = json.keys()
-        while (keys.hasNext()) {
-            val uuid = keys.next()
-            val taskObj = json.optJSONObject(uuid) ?: continue
-            val props = mutableMapOf<String, String>()
-            val propKeys = taskObj.keys()
-            while (propKeys.hasNext()) {
-                val key = propKeys.next()
-                props[key] = taskObj.optString(key)
+        val trimmed = decompressed.trimStart()
+        if (trimmed.startsWith("[")) {
+            // Array format: [[uuid, {properties}], ...] (TaskChampion wire format)
+            val arr = JSONArray(decompressed)
+            for (i in 0 until arr.length()) {
+                val entry = arr.optJSONArray(i) ?: continue
+                val uuid = entry.optString(0) ?: continue
+                val taskObj = entry.optJSONObject(1) ?: continue
+                val props = mutableMapOf<String, String>()
+                val propKeys = taskObj.keys()
+                while (propKeys.hasNext()) {
+                    val key = propKeys.next()
+                    props[key] = taskObj.optString(key)
+                }
+                tasks[uuid] = props
             }
-            tasks[uuid] = props
+        } else {
+            // Legacy object format: {uuid: {properties}, ...}
+            val json = JSONObject(decompressed)
+            val keys = json.keys()
+            while (keys.hasNext()) {
+                val uuid = keys.next()
+                val taskObj = json.optJSONObject(uuid) ?: continue
+                val props = mutableMapOf<String, String>()
+                val propKeys = taskObj.keys()
+                while (propKeys.hasNext()) {
+                    val key = propKeys.next()
+                    props[key] = taskObj.optString(key)
+                }
+                tasks[uuid] = props
+            }
         }
         return Snapshot(versionId = versionId, tasks = tasks)
     }
