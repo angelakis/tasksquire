@@ -209,7 +209,7 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
  */
 data class UploadResult(val newVersionId: String, val snapshotUrgency: String?)
 
-class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
+open class SyncException(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 /**
  * Thrown when the server does not recognize the parent version ID we sent.
