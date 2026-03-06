@@ -161,6 +161,12 @@ class SyncManager(
         log(SyncLogLevel.INFO, "Fetching server operations since $lastVersion")
         val serverOps = try {
             client.getOperationsSince(lastVersion)
+        } catch (e: SyncVersionNotFoundException) {
+            // Server has pruned the version we know about (410 Gone). Reset so the
+            // next retry fetches a fresh snapshot and starts over.
+            log(SyncLogLevel.WARN, "Server version $lastVersion expired (410), resetting sync state")
+            saveLastVersion(NULL_VERSION_ID)
+            return SyncResult.Error("Server version expired, resetting sync state: ${e.message}", e)
         } catch (e: SyncException) {
             return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
         }
@@ -192,17 +198,25 @@ class SyncManager(
 
         // Upload local operations
         log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
-        val newVersionId = try {
+        val uploadResult = try {
             client.uploadOperations(lastVersion, localOps)
+        } catch (e: SyncVersionNotFoundException) {
+            // Server doesn't know our parent version — reset local state so the next
+            // retry starts from scratch (fetches a fresh snapshot).
+            log(SyncLogLevel.WARN, "Server does not recognise version $lastVersion, resetting sync state")
+            saveLastVersion(NULL_VERSION_ID)
+            return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
         } catch (e: SyncException) {
             return SyncResult.Error("Failed to upload operations: ${e.message}", e)
         }
 
-        if (newVersionId == null) {
+        if (uploadResult == null) {
             // Conflict - retry
             log(SyncLogLevel.WARN, "Version conflict during upload")
             return SyncResult.Error("Version conflict, retrying...")
         }
+
+        val newVersionId = uploadResult.newVersionId
 
         // Mark all uploaded tasks as synced
         for (task in modifiedTasks) {
@@ -210,8 +224,13 @@ class SyncManager(
         }
         saveLastVersion(newVersionId)
 
-        // Periodically upload a snapshot (every 50 operations approx)
-        if (localOps.size > 20) {
+        // Upload a snapshot when the server requests one (mobile clients honour "high" urgency)
+        // or when we've just sent a large batch of operations.
+        val snapshotUrgency = uploadResult.snapshotUrgency
+        if (snapshotUrgency == "high" || snapshotUrgency == "low" || localOps.size > 20) {
+            if (snapshotUrgency != null) {
+                log(SyncLogLevel.INFO, "Server requested snapshot (urgency=$snapshotUrgency)")
+            }
             uploadSnapshot(client, newVersionId)
         }
 
@@ -222,11 +241,9 @@ class SyncManager(
         for (op in operations) {
             when (op) {
                 is Operation.Create -> {
-                    // Will be populated by subsequent Update operations
-                    val existing = repository.getTaskByUuid(op.uuid)
-                    if (existing == null) {
-                        // Placeholder - will be filled in by Update ops
-                    }
+                    // Will be populated by subsequent Update operations in the same segment
+                    // (handled in the second pass below) or in a future sync segment.
+                    // No action needed here; placeholder creation is deferred to second pass.
                 }
                 is Operation.Update -> {
                     val existing = repository.getTaskByUuid(op.uuid)
@@ -261,9 +278,15 @@ class SyncManager(
                         }
                     }
                     val task = OperationBuilder.taskFromProperties(uuid, props)
-                    if (task != null) {
-                        repository.upsertTasksFromSync(listOf(task))
-                    }
+                        ?: com.taskwarrior.android.data.Task(
+                            // Description hasn't arrived yet (cross-batch Create); save a placeholder
+                            // so that Update ops from future syncs have a task to modify.
+                            uuid = uuid,
+                            description = "",
+                            isSynced = true,
+                            isModifiedLocally = false
+                        )
+                    repository.upsertTasksFromSync(listOf(task))
                 }
             }
         }
