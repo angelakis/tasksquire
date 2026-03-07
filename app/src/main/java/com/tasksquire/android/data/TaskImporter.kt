@@ -1,4 +1,4 @@
-package com.taskwarrior.android.data
+package com.tasksquire.android.data
 
 import org.json.JSONArray
 import org.json.JSONObject

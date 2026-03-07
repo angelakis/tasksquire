@@ -1,12 +1,12 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
 import android.content.Context
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
-import com.taskwarrior.android.data.Task
-import com.taskwarrior.android.data.TaskRepository
+import com.tasksquire.android.data.Task
+import com.tasksquire.android.data.TaskRepository
 import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
@@ -278,7 +278,7 @@ class SyncManager(
                         }
                     }
                     val task = OperationBuilder.taskFromProperties(uuid, props)
-                        ?: com.taskwarrior.android.data.Task(
+                        ?: com.tasksquire.android.data.Task(
                             // Description hasn't arrived yet (cross-batch Create); save a placeholder
                             // so that Update ops from future syncs have a task to modify.
                             uuid = uuid,
@@ -296,17 +296,17 @@ class SyncManager(
         return when (op.property) {
             "description" -> task.copy(description = op.value ?: task.description)
             "status" -> task.copy(status = when (op.value?.lowercase()) {
-                "pending" -> com.taskwarrior.android.data.TaskStatus.PENDING
-                "completed" -> com.taskwarrior.android.data.TaskStatus.COMPLETED
-                "deleted" -> com.taskwarrior.android.data.TaskStatus.DELETED
-                "waiting" -> com.taskwarrior.android.data.TaskStatus.WAITING
+                "pending" -> com.tasksquire.android.data.TaskStatus.PENDING
+                "completed" -> com.tasksquire.android.data.TaskStatus.COMPLETED
+                "deleted" -> com.tasksquire.android.data.TaskStatus.DELETED
+                "waiting" -> com.tasksquire.android.data.TaskStatus.WAITING
                 else -> task.status
             })
             "priority" -> task.copy(priority = when (op.value?.uppercase()) {
-                "H" -> com.taskwarrior.android.data.TaskPriority.HIGH
-                "M" -> com.taskwarrior.android.data.TaskPriority.MEDIUM
-                "L" -> com.taskwarrior.android.data.TaskPriority.LOW
-                else -> com.taskwarrior.android.data.TaskPriority.NONE
+                "H" -> com.tasksquire.android.data.TaskPriority.HIGH
+                "M" -> com.tasksquire.android.data.TaskPriority.MEDIUM
+                "L" -> com.tasksquire.android.data.TaskPriority.LOW
+                else -> com.tasksquire.android.data.TaskPriority.NONE
             })
             "project" -> task.copy(project = op.value)
             "due" -> task.copy(due = parseTaskChampionTimestamp(op.value))
