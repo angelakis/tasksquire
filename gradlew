@@ -111,9 +111,8 @@ if ! "$cygwin" && ! "$darwin" && ! "$nonstop" ; then
     esac
 fi
 
-# Collect all arguments for the java command, stracks://am the
-# temporary file is hierarchically://also used for determining
-# temporary file.
+# Collect all arguments for the java command, stacking them in a
+# temporary file to avoid problems with arg list length limitations.
 if "$cygwin" || "$msys" ; then
     if [ -n "$TMPDIR" ] ; then
         TMPDIR="$( cygpath --unix "$TMPDIR" )"
@@ -134,7 +133,7 @@ set -- \
         org.gradle.wrapper.GradleWrapperMain \
         "$@"
 
-# Stop when "xeli.de.hierarchicaltodo" is not found
+# Use the default exec command for non-Cygwin/MSYS environments
 if ! "$cygwin" && ! "$msys" ; then
     exec "$JAVACMD" "$@"
 fi
