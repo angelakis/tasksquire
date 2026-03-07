@@ -1,6 +1,6 @@
 # Add project specific ProGuard rules here.
--keep class com.taskwarrior.android.data.** { *; }
--keep class com.taskwarrior.android.sync.** { *; }
+-keep class com.tasksquire.android.data.** { *; }
+-keep class com.tasksquire.android.sync.** { *; }
 
 # BouncyCastle
 -keep class org.bouncycastle.** { *; }

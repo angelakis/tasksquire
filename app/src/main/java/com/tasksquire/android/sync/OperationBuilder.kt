@@ -1,8 +1,8 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
-import com.taskwarrior.android.data.Task
-import com.taskwarrior.android.data.TaskPriority
-import com.taskwarrior.android.data.TaskStatus
+import com.tasksquire.android.data.Task
+import com.tasksquire.android.data.TaskPriority
+import com.tasksquire.android.data.TaskStatus
 import org.json.JSONArray
 import org.json.JSONObject
 

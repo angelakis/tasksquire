@@ -1,4 +1,4 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream

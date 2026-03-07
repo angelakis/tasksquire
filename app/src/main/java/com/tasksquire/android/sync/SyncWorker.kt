@@ -1,4 +1,4 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
 import android.content.Context
 import androidx.work.BackoffPolicy
@@ -12,8 +12,8 @@ import androidx.work.PeriodicWorkRequest
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.taskwarrior.android.data.TaskDatabase
-import com.taskwarrior.android.data.TaskRepository
+import com.tasksquire.android.data.TaskDatabase
+import com.tasksquire.android.data.TaskRepository
 import java.util.concurrent.TimeUnit
 
 class SyncWorker(
