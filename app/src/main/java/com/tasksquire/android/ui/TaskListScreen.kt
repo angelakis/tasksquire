@@ -1,4 +1,4 @@
-package com.taskwarrior.android.ui
+package com.tasksquire.android.ui
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
@@ -21,11 +21,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.taskwarrior.android.data.Task
-import com.taskwarrior.android.data.TaskPriority
-import com.taskwarrior.android.data.TaskStatus
-import com.taskwarrior.android.ui.DependencyFilter
-import com.taskwarrior.android.ui.DueFilter
+import com.tasksquire.android.data.Task
+import com.tasksquire.android.data.TaskPriority
+import com.tasksquire.android.data.TaskStatus
+import com.tasksquire.android.ui.DependencyFilter
+import com.tasksquire.android.ui.DueFilter
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -139,7 +139,7 @@ fun TaskListScreen(
                                 }
                             )
                         } else {
-                            Text("Taskwarrior")
+                            Text("TaskSquire")
                         }
                     },
                     navigationIcon = {

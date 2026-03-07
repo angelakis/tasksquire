@@ -1,4 +1,4 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
 import org.json.JSONArray
 import org.json.JSONObject

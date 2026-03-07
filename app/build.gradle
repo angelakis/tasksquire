@@ -5,11 +5,11 @@ plugins {
 }
 
 android {
-    namespace 'com.taskwarrior.android'
+    namespace 'com.tasksquire.android'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.taskwarrior.android"
+        applicationId "com.tasksquire.android"
         minSdk 26
         targetSdk 34
         versionCode 1

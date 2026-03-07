@@ -1,4 +1,4 @@
-package com.taskwarrior.android
+package com.tasksquire.android
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -10,7 +10,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
-import com.taskwarrior.android.ui.*
+import com.tasksquire.android.ui.*
 
 class MainActivity : ComponentActivity() {
     private val viewModel: TaskViewModel by viewModels()
@@ -18,8 +18,8 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            TaskwarriorTheme {
-                TaskwarriorApp(viewModel)
+            TaskSquireTheme {
+                TaskSquireApp(viewModel)
             }
         }
     }
@@ -31,7 +31,7 @@ class MainActivity : ComponentActivity() {
 }
 
 @Composable
-fun TaskwarriorApp(viewModel: TaskViewModel) {
+fun TaskSquireApp(viewModel: TaskViewModel) {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = "task_list") {

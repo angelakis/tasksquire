@@ -1,4 +1,4 @@
-package com.taskwarrior.android.sync
+package com.tasksquire.android.sync
 
 /**
  * Parse a TaskChampion timestamp value (epoch seconds as a decimal integer string)

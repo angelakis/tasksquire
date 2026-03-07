@@ -1,4 +1,4 @@
-package com.taskwarrior.android.ui
+package com.tasksquire.android.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -19,8 +19,8 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
-import com.taskwarrior.android.sync.SyncLogEntry
-import com.taskwarrior.android.sync.SyncServerConfig
+import com.tasksquire.android.sync.SyncLogEntry
+import com.tasksquire.android.sync.SyncServerConfig
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -297,11 +297,14 @@ fun SettingsScreen(
             )
 
             Text(
-                text = "Taskwarrior Android is an open-source task manager that " +
+                text = "TaskSquire is an open-source task manager that " +
                     "syncs with Taskwarrior via the TaskChampion sync protocol.\n\n" +
                     "Compatible with:\n" +
                     "• taskchampion-sync-server\n" +
-                    "• Taskwarrior 3.x (taskchampion backend)",
+                    "• Taskwarrior 3.x (taskchampion backend)\n\n" +
+                    "Taskwarrior is maintained by Gothenburg Bit Factory. " +
+                    "TaskSquire is independently developed and not affiliated " +
+                    "with or endorsed by the Taskwarrior project.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -312,9 +315,9 @@ fun SettingsScreen(
 @Composable
 private fun SyncLogRow(entry: SyncLogEntry, timeFormat: SimpleDateFormat) {
     val levelColor = when (entry.level) {
-        com.taskwarrior.android.sync.SyncLogLevel.ERROR -> MaterialTheme.colorScheme.error
-        com.taskwarrior.android.sync.SyncLogLevel.WARN -> MaterialTheme.colorScheme.tertiary
-        com.taskwarrior.android.sync.SyncLogLevel.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
+        com.tasksquire.android.sync.SyncLogLevel.ERROR -> MaterialTheme.colorScheme.error
+        com.tasksquire.android.sync.SyncLogLevel.WARN -> MaterialTheme.colorScheme.tertiary
+        com.tasksquire.android.sync.SyncLogLevel.INFO -> MaterialTheme.colorScheme.onSurfaceVariant
     }
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Text(

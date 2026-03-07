@@ -1,4 +1,4 @@
-package com.taskwarrior.android.data
+package com.tasksquire.android.data
 
 import kotlinx.coroutines.flow.Flow
 

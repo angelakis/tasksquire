@@ -1,4 +1,4 @@
-package com.taskwarrior.android.data
+package com.tasksquire.android.data
 
 import android.content.Context
 import androidx.room.Database
@@ -27,7 +27,7 @@ abstract class TaskDatabase : RoomDatabase() {
                 val instance = Room.databaseBuilder(
                     context.applicationContext,
                     TaskDatabase::class.java,
-                    "taskwarrior_database"
+                    "tasksquire_database"
                 )
                     .addMigrations(MIGRATION_1_2)
                     .build()
