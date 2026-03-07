@@ -39,8 +39,7 @@ object TaskChampionCodec {
     }
 
     fun decodeHistorySegment(bytes: ByteArray): List<Operation> {
-        val obj = JSONObject(bytes.toString(Charsets.UTF_8))
-        val ops = obj.getJSONArray("operations")
+        val ops = JSONArray(bytes.toString(Charsets.UTF_8))
         return buildList {
             for (i in 0 until ops.length()) {
                 val opObj = ops.optJSONObject(i) ?: continue
