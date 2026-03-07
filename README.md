@@ -1,13 +1,17 @@
 # TaskSquire
 
-An Android task manager compatible with [Taskwarrior](https://taskwarrior.org/) that can sync with [TaskChampion Sync-Server](https://github.com/GothenburgBitFactory/taskchampion-sync-server).
+An Android task manager that syncs with [Taskwarrior](https://taskwarrior.org/) via the [TaskChampion sync protocol](https://github.com/GothenburgBitFactory/taskchampion-sync-server). Manage your tasks on mobile and keep them in sync with your Taskwarrior 3.x setup on desktop.
 
-> **Warning**: This project is vibecoded. Expect bugs, rough edges, and potential security issues. Use at your own risk.
+> **Warning**: This project is vibe coded. I would be surprised if it's not full of bugs or security issues. Use at your own risk.
 
 ## Features
 
-- Task management with priorities, projects, tags, due dates, and dependencies
-- TaskChampion sync protocol (Taskwarrior 3.x compatible)
+- **Task management** — priorities, projects, tags, due dates, dependencies, recurrence, and annotations
+- **Sync** — bidirectional sync with TaskChampion Sync-Server, with client-side encryption and automatic conflict resolution
+- **Auto-sync** — periodic background sync and sync-on-open via WorkManager
+- **Filtering** — search and filter by project, tags, priority, due date, and dependency status
+- **Import/Export** — bulk import tasks from JSON
+- **Material You** — built with Jetpack Compose and Material 3
 
 ## Building
 
@@ -25,7 +29,7 @@ An Android task manager compatible with [Taskwarrior](https://taskwarrior.org/) 
 
 ## Disclaimer
 
-Taskwarrior is maintained by [Gothenburg Bit Factory](https://github.com/GothenburgBitFactory). TaskSquire is independently developed and is not affiliated with or endorsed by the Taskwarrior project. The Taskwarrior name is used solely to indicate compatibility with the TaskChampion sync protocol.
+TaskSquire is an independent project and is not affiliated with or endorsed by [Gothenburg Bit Factory](https://github.com/GothenburgBitFactory) or the Taskwarrior project.
 
 ## License
 
