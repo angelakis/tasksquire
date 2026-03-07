@@ -14,3 +14,7 @@ app/build/
 *.jks
 *.keystore
 google-services.json
+*.env
+.env.*
+secrets.*
+signing.properties
