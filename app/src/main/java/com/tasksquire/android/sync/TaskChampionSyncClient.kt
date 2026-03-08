@@ -57,8 +57,16 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
                     val versionId = requiredUuidHeader(resp, "X-Version-Id")
                     requireContentType(resp, SNAPSHOT_CONTENT_TYPE, "fetching snapshot")
                     val body = resp.body?.bytes() ?: throw SyncException("Empty snapshot response")
-                    val snapshotBytes = cryptor.unseal(versionId, body)
-                    TaskChampionCodec.decodeSnapshot(versionId, snapshotBytes)
+                    val snapshotBytes = try {
+                        cryptor.unseal(versionId, body)
+                    } catch (e: Exception) {
+                        throw SyncException("Failed to decrypt snapshot: ${e.message}", e)
+                    }
+                    try {
+                        TaskChampionCodec.decodeSnapshot(versionId, snapshotBytes)
+                    } catch (e: Exception) {
+                        throw SyncException("Failed to decode snapshot (${snapshotBytes.size} bytes): ${e.message}", e)
+                    }
                 }
                 404 -> null
                 else -> throw SyncException(unexpectedStatusMessage(resp.code, "fetching snapshot", resp.body?.string()))
@@ -108,8 +116,17 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
                     val versionId = requiredUuidHeader(resp, "X-Version-Id")
                     requireContentType(resp, HISTORY_SEGMENT_CONTENT_TYPE, "fetching operations")
                     val body = resp.body?.bytes() ?: throw SyncException("Empty operations response")
-                    val historySegment = cryptor.unseal(parentVersionId, body)
-                    versionId to TaskChampionCodec.decodeHistorySegment(historySegment)
+                    val historySegment = try {
+                        cryptor.unseal(parentVersionId, body)
+                    } catch (e: Exception) {
+                        throw SyncException("Failed to decrypt history segment for parent $parentVersionId: ${e.message}", e)
+                    }
+                    val operations = try {
+                        TaskChampionCodec.decodeHistorySegment(historySegment)
+                    } catch (e: Exception) {
+                        throw SyncException("Failed to decode history segment (${historySegment.size} bytes): ${e.message}", e)
+                    }
+                    versionId to operations
                 }
                 404 -> null // Client is up-to-date; no new versions exist
                 410 -> throw SyncVersionNotFoundException(

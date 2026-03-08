@@ -123,6 +123,11 @@ class SyncManager(
                 if (retries >= MAX_SYNC_RETRIES - 1) {
                     return@withContext SyncResult.Error(e.message ?: "Sync failed", e)
                 }
+            } catch (e: Exception) {
+                log(SyncLogLevel.ERROR, "Unexpected sync error: ${e.javaClass.simpleName}: ${e.message}")
+                if (retries >= MAX_SYNC_RETRIES - 1) {
+                    return@withContext SyncResult.Error("Unexpected error: ${e.message}", e)
+                }
             }
             log(SyncLogLevel.WARN, "Retrying sync after conflict/error (attempt ${retries + 2}/$MAX_SYNC_RETRIES)")
             retries++
@@ -136,11 +141,13 @@ class SyncManager(
 
         // If we have no version history, try to fetch a snapshot first
         if (lastVersion == NULL_VERSION_ID) {
-            log(SyncLogLevel.INFO, "No local sync version; fetching snapshot")
+            log(SyncLogLevel.INFO, "First sync: no local version history, fetching snapshot from server")
             val snapshot = try {
                 client.fetchSnapshot()
             } catch (e: SyncException) {
                 return SyncResult.Error("Failed to fetch snapshot: ${e.message}", e)
+            } catch (e: Exception) {
+                return SyncResult.Error("Unexpected error fetching snapshot: ${e.message}", e)
             }
 
             if (snapshot != null) {
@@ -151,9 +158,9 @@ class SyncManager(
                 repository.upsertTasksFromSync(tasks)
                 lastVersion = snapshot.versionId
                 saveLastVersion(lastVersion)
-                log(SyncLogLevel.INFO, "Applied snapshot with ${tasks.size} tasks")
+                log(SyncLogLevel.INFO, "Applied snapshot: ${tasks.size} tasks from version $lastVersion")
             } else {
-                log(SyncLogLevel.INFO, "No snapshot on server")
+                log(SyncLogLevel.INFO, "No snapshot on server (server may be empty or snapshot was not yet created)")
             }
         }
 
@@ -169,6 +176,8 @@ class SyncManager(
             return SyncResult.Error("Server version expired, resetting sync state: ${e.message}", e)
         } catch (e: SyncException) {
             return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
+        } catch (e: Exception) {
+            return SyncResult.Error("Unexpected error fetching operations: ${e.message}", e)
         }
 
         var serverTasksReceived = 0
@@ -184,7 +193,11 @@ class SyncManager(
             saveLastVersion(lastVersion)
             log(SyncLogLevel.INFO, "Received $serverTasksReceived tasks (${operations.size} operations)")
         } else {
-            log(SyncLogLevel.INFO, "No child version found for $lastVersion")
+            if (lastVersion == NULL_VERSION_ID) {
+                log(SyncLogLevel.INFO, "Server has no version history (server is empty or not yet synced from another client)")
+            } else {
+                log(SyncLogLevel.INFO, "Server is up to date (no new operations since version $lastVersion)")
+            }
         }
 
         // Build operations from local modifications
@@ -197,7 +210,7 @@ class SyncManager(
         }
 
         // Upload local operations
-        log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
+        log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations (parent version: $lastVersion)")
         val uploadResult = try {
             client.uploadOperations(lastVersion, localOps)
         } catch (e: SyncVersionNotFoundException) {
@@ -208,6 +221,8 @@ class SyncManager(
             return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
         } catch (e: SyncException) {
             return SyncResult.Error("Failed to upload operations: ${e.message}", e)
+        } catch (e: Exception) {
+            return SyncResult.Error("Unexpected error uploading operations: ${e.message}", e)
         }
 
         if (uploadResult == null) {
