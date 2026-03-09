@@ -1,0 +1,136 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  # Allow manual trigger for testing
+  workflow_dispatch:
+
+jobs:
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Run unit tests
+        run: ./gradlew test
+
+  sync-integration:
+    name: Sync Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      sync-server:
+        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:latest
+        ports:
+          - 8080:8080
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8080 || exit 0"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Wait for sync server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://localhost:8080; then
+              echo "Sync server is ready"
+              break
+            fi
+            echo "Waiting for sync server... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run integration tests
+        env:
+          SYNC_TEST_SERVER_URL: http://localhost:8080
+        run: ./gradlew test --tests "com.tasksquire.android.sync.integration.*"
+
+  cross-client:
+    name: Cross-Client Compatibility (Taskwarrior)
+    runs-on: ubuntu-latest
+    needs: unit-tests
+
+    services:
+      sync-server:
+        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:latest
+        ports:
+          - 8080:8080
+        options: >-
+          --health-cmd "wget --spider -q http://localhost:8080 || exit 0"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Taskwarrior 3
+        run: |
+          # Try to install taskwarrior 3.x; fall back to building from source
+          sudo apt-get update
+          # Taskwarrior 3.x may not be in default repos; try the PPA or build from source
+          if ! apt-cache show taskwarrior 2>/dev/null | grep -q "Version: 3"; then
+            echo "Building Taskwarrior 3 from source..."
+            sudo apt-get install -y cmake g++ libgnutls28-dev uuid-dev cargo
+            git clone --depth 1 https://github.com/GothenburgBitFactory/taskwarrior.git /tmp/taskwarrior
+            cd /tmp/taskwarrior
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+            cmake --build build -j$(nproc)
+            sudo cmake --install build
+          else
+            sudo apt-get install -y taskwarrior
+          fi
+          task --version
+
+      - name: Wait for sync server
+        run: |
+          for i in $(seq 1 30); do
+            if curl -s -o /dev/null http://localhost:8080; then
+              echo "Sync server is ready"
+              break
+            fi
+            echo "Waiting for sync server... ($i/30)"
+            sleep 2
+          done
+
+      - name: Run cross-client tests
+        env:
+          SYNC_TEST_SERVER_URL: http://localhost:8080
+        run: |
+          chmod +x scripts/test-cross-client.sh
+          ./scripts/test-cross-client.sh
