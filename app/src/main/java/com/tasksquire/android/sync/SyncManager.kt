@@ -133,6 +133,7 @@ class SyncManager(
 
     private suspend fun performSyncCycle(client: TaskChampionSyncClient): SyncResult {
         var lastVersion = getLastVersion()
+        var lastConflictParent: String? = null
 
         // If we have no version history, try to fetch a snapshot first
         if (lastVersion == NULL_VERSION_ID) {
@@ -157,52 +158,62 @@ class SyncManager(
             }
         }
 
-        // Fetch operations from server since our last version
-        log(SyncLogLevel.INFO, "Fetching server operations since $lastVersion")
-        val serverOps = try {
-            client.getOperationsSince(lastVersion)
-        } catch (e: SyncVersionNotFoundException) {
-            // Server has pruned the version we know about (410 Gone). Reset so the
-            // next retry fetches a fresh snapshot and starts over.
-            log(SyncLogLevel.WARN, "Server version $lastVersion expired (410), resetting sync state")
-            saveLastVersion(NULL_VERSION_ID)
-            return SyncResult.Error("Server version expired, resetting sync state: ${e.message}", e)
-        } catch (e: SyncException) {
-            return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
-        }
-
-        var serverTasksReceived = 0
-        if (serverOps != null) {
-            val (newVersionId, operations) = serverOps
-            applyOperationsToLocal(operations)
-            serverTasksReceived = operations.map { when (it) {
-                is Operation.Create -> it.uuid
-                is Operation.Update -> it.uuid
-                is Operation.Delete -> it.uuid
-            } }.distinct().size
-            lastVersion = newVersionId
-            saveLastVersion(lastVersion)
-            log(SyncLogLevel.INFO, "Received $serverTasksReceived tasks (${operations.size} operations)")
-        } else {
-            log(SyncLogLevel.INFO, "No child version found for $lastVersion")
-        }
-
         // Build operations from local modifications
         val modifiedTasks = repository.getModifiedTasks()
-        val localOps = buildLocalOperations(modifiedTasks)
+        var localOps = buildLocalOperations(modifiedTasks)
         log(SyncLogLevel.INFO, "Prepared ${localOps.size} local operations from ${modifiedTasks.size} modified tasks")
 
+        // Phase 1: Pull all new versions from server, transforming local ops via OT
+        var serverTasksReceived = 0
+        log(SyncLogLevel.INFO, "Fetching server operations since $lastVersion")
+
+        pullLoop@ while (true) {
+            val serverOps = try {
+                client.getOperationsSince(lastVersion)
+            } catch (e: SyncVersionNotFoundException) {
+                // Server has pruned the version we know about (410 Gone). Recover via snapshot.
+                log(SyncLogLevel.WARN, "Server version $lastVersion expired (410), recovering via snapshot")
+                handleSnapshotRecovery(client)
+                return SyncResult.Error("Server version expired, recovered via snapshot. Re-sync needed.", e)
+            } catch (e: SyncException) {
+                return SyncResult.Error("Failed to fetch operations: ${e.message}", e)
+            }
+
+            if (serverOps == null) {
+                // 404: we're up to date
+                break@pullLoop
+            }
+
+            val (newVersionId, operations) = serverOps
+
+            // Transform local ops against server ops via OT, then apply server ops locally
+            val (transformedServerOps, transformedLocalOps) =
+                OperationalTransform.rebase(operations, localOps)
+            localOps = transformedLocalOps
+
+            applyOperationsToLocal(transformedServerOps)
+            serverTasksReceived += operations.map { op ->
+                when (op) {
+                    is Operation.Create -> op.uuid
+                    is Operation.Update -> op.uuid
+                    is Operation.Delete -> op.uuid
+                }
+            }.distinct().size
+
+            lastVersion = newVersionId
+            saveLastVersion(lastVersion)
+            log(SyncLogLevel.INFO, "Applied ${operations.size} server operations (version $newVersionId)")
+        }
+
+        // Phase 2: Push local changes to server
         if (localOps.isEmpty()) {
             return SyncResult.Success(serverTasksReceived, 0)
         }
 
-        // Upload local operations
         log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
         val uploadResult = try {
             client.uploadOperations(lastVersion, localOps)
         } catch (e: SyncVersionNotFoundException) {
-            // Server doesn't know our parent version — reset local state so the next
-            // retry starts from scratch (fetches a fresh snapshot).
             log(SyncLogLevel.WARN, "Server does not recognise version $lastVersion, resetting sync state")
             saveLastVersion(NULL_VERSION_ID)
             return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
@@ -211,8 +222,16 @@ class SyncManager(
         }
 
         if (uploadResult == null) {
-            // Conflict - retry
-            log(SyncLogLevel.WARN, "Version conflict during upload")
+            // 409 Conflict — another client pushed first.
+            // Check for consecutive 409s with the same parent (divergence detection).
+            val expectedParent = lastVersion // We tried to push against this version
+            if (expectedParent == lastConflictParent) {
+                log(SyncLogLevel.WARN, "Two consecutive 409s with same parent, recovering via snapshot")
+                handleSnapshotRecovery(client)
+                return SyncResult.Error("Divergence detected, recovered via snapshot. Re-sync needed.")
+            }
+            lastConflictParent = expectedParent
+            log(SyncLogLevel.WARN, "Version conflict during upload, will retry")
             return SyncResult.Error("Version conflict, retrying...")
         }
 
@@ -235,6 +254,26 @@ class SyncManager(
         }
 
         return SyncResult.Success(serverTasksReceived, modifiedTasks.size)
+    }
+
+    private suspend fun handleSnapshotRecovery(client: TaskChampionSyncClient) {
+        try {
+            val snapshot = client.fetchSnapshot()
+            if (snapshot != null) {
+                val tasks = snapshot.tasks.mapNotNull { (uuid, props) ->
+                    OperationBuilder.taskFromProperties(uuid, props)
+                }
+                repository.upsertTasksFromSync(tasks)
+                saveLastVersion(snapshot.versionId)
+                log(SyncLogLevel.INFO, "Recovered via snapshot with ${tasks.size} tasks")
+            } else {
+                saveLastVersion(NULL_VERSION_ID)
+                log(SyncLogLevel.WARN, "No snapshot available for recovery, resetting to nil version")
+            }
+        } catch (e: Exception) {
+            saveLastVersion(NULL_VERSION_ID)
+            log(SyncLogLevel.ERROR, "Snapshot recovery failed: ${e.message}")
+        }
     }
 
     private suspend fun applyOperationsToLocal(operations: List<Operation>) {
