@@ -7,6 +7,16 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+# Pin the sync server version for reproducible builds.
+# Update this when upgrading — check compatibility with Taskwarrior 3.x.
+# Available tags: https://github.com/GothenburgBitFactory/taskchampion-sync-server/pkgs/container/taskchampion-sync-server
+#
+# NOTE: GitHub Actions does not support env vars in services.image, so the
+# version is repeated in each job's services block. Keep them in sync.
+
+env:
+  SYNC_TEST_SERVER_URL: "http://localhost:8080"
+
 jobs:
   sync-integration:
     name: Sync Integration Tests
@@ -14,7 +24,7 @@ jobs:
 
     services:
       sync-server:
-        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:latest
+        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:0.7.1
         ports:
           - 8080:8080
 
@@ -34,8 +44,7 @@ jobs:
         run: |
           echo "Waiting for taskchampion-sync-server on port 8080..."
           for i in $(seq 1 30); do
-            # The server may return 404 on root; any TCP response means it's up
-            if curl -s -o /dev/null -w '' http://localhost:8080/ 2>/dev/null; then
+            if curl -s -o /dev/null -w '' "$SYNC_TEST_SERVER_URL/" 2>/dev/null; then
               echo "Sync server is ready (attempt $i)"
               exit 0
             fi
@@ -46,8 +55,6 @@ jobs:
           exit 1
 
       - name: Run unit and integration tests
-        env:
-          SYNC_TEST_SERVER_URL: http://localhost:8080
         run: ./gradlew testDebugUnitTest
 
   cross-client:
@@ -56,35 +63,24 @@ jobs:
 
     services:
       sync-server:
-        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:latest
+        image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:0.7.1
         ports:
           - 8080:8080
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install Taskwarrior 3 build dependencies
+      - name: Install Taskwarrior 3 via Snap
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake g++ libgnutls28-dev uuid-dev
-
-      - name: Build and install Taskwarrior 3
-        run: |
-          git clone --depth 1 https://github.com/GothenburgBitFactory/taskwarrior.git /tmp/taskwarrior
-          cd /tmp/taskwarrior
-          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-          cmake --build build -j$(nproc)
-          sudo cmake --install build
+          sudo snap install simpoir-taskwarrior3
+          sudo snap alias simpoir-taskwarrior3.task task
           task --version
 
       - name: Wait for sync server
         run: |
           echo "Waiting for taskchampion-sync-server on port 8080..."
           for i in $(seq 1 30); do
-            if curl -s -o /dev/null -w '' http://localhost:8080/ 2>/dev/null; then
+            if curl -s -o /dev/null -w '' "$SYNC_TEST_SERVER_URL/" 2>/dev/null; then
               echo "Sync server is ready (attempt $i)"
               exit 0
             fi
@@ -95,8 +91,6 @@ jobs:
           exit 1
 
       - name: Run cross-client tests
-        env:
-          SYNC_TEST_SERVER_URL: http://localhost:8080
         run: |
           chmod +x scripts/test-cross-client.sh
           ./scripts/test-cross-client.sh

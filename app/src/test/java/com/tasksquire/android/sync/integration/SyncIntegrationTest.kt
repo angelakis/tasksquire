@@ -38,12 +38,26 @@ class SyncIntegrationTest {
 
     @Before
     fun setUp() {
+        // Auto-detect: use env var if set, otherwise try localhost:8080 (CI default).
+        // Skip only if the server is genuinely unreachable.
         val url = System.getenv("SYNC_TEST_SERVER_URL")
+            ?: "http://localhost:8080"
+        val reachable = try {
+            val conn = java.net.URL("$url/").openConnection() as java.net.HttpURLConnection
+            conn.connectTimeout = 2000
+            conn.readTimeout = 2000
+            conn.requestMethod = "GET"
+            conn.responseCode // any response means server is up
+            true
+        } catch (_: Exception) {
+            false
+        }
         assumeTrue(
-            "Skipping integration test: set SYNC_TEST_SERVER_URL to run (e.g., http://localhost:8080)",
-            !url.isNullOrBlank()
+            "Skipping integration test: no sync server reachable at $url " +
+                "(start one with: docker compose -f docker-compose.test.yml up -d)",
+            reachable
         )
-        serverUrl = url!!
+        serverUrl = url
         clientId = UUID.randomUUID().toString()
         secret = "integration-test-secret-${UUID.randomUUID()}"
     }
