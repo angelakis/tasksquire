@@ -72,7 +72,7 @@ jobs:
 
       - name: Install Taskwarrior 3 via Snap
         run: |
-          sudo snap install simpoir-taskwarrior3
+          sudo snap install simpoir-taskwarrior3 --edge
           sudo snap alias simpoir-taskwarrior3.task task
           task --version
 
