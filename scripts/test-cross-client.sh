@@ -19,14 +19,18 @@ set -euo pipefail
 SERVER_URL="${SYNC_TEST_SERVER_URL:-http://localhost:8080}"
 CLIENT_ID="$(python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 SECRET="cross-client-test-$(date +%s)"
-TASKRC=$(mktemp)
-TASKDATA=$(mktemp -d)
+
+# Use $HOME for temp files — snap confinement restricts /tmp access.
+TEST_DIR="$HOME/.tasksquire-test-$$"
+mkdir -p "$TEST_DIR"
+TASKRC="$TEST_DIR/taskrc"
+TASKDATA="$TEST_DIR/data"
+mkdir -p "$TASKDATA"
 PASSED=0
 FAILED=0
 
 cleanup() {
-    rm -f "$TASKRC" "$TASKRC2" "$TASKRC3" 2>/dev/null || true
-    rm -rf "$TASKDATA" "$TASKDATA2" "$TASKDATA3" 2>/dev/null || true
+    rm -rf "$TEST_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -141,8 +145,9 @@ pass "Annotation added and synced"
 echo ""
 echo "Test 5: Server -> Desktop (second replica)"
 
-TASKDATA2=$(mktemp -d)
-TASKRC2=$(mktemp)
+TASKDATA2="$TEST_DIR/data2"
+TASKRC2="$TEST_DIR/taskrc2"
+mkdir -p "$TASKDATA2"
 cat > "$TASKRC2" <<EOF
 data.location=$TASKDATA2
 sync.server.origin=$SERVER_URL
@@ -191,8 +196,9 @@ fi
 echo ""
 echo "Test 7: Fresh replica bootstrap"
 
-TASKDATA3=$(mktemp -d)
-TASKRC3=$(mktemp)
+TASKDATA3="$TEST_DIR/data3"
+TASKRC3="$TEST_DIR/taskrc3"
+mkdir -p "$TASKDATA3"
 cat > "$TASKRC3" <<EOF
 data.location=$TASKDATA3
 sync.server.origin=$SERVER_URL
