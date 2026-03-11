@@ -6,12 +6,12 @@
 #
 # Prerequisites:
 #   - Docker and Docker Compose
-#   - JDK 17+ and Gradle
+#   - JDK 17+ and Gradle (or use the Gradle wrapper)
 #
 # This script:
 #   1. Starts taskchampion-sync-server via Docker Compose
-#   2. Waits for the server to be healthy
-#   3. Runs integration tests
+#   2. Waits for the server to accept connections
+#   3. Runs all unit + integration tests
 #   4. Tears down the server
 
 set -euo pipefail
@@ -29,10 +29,10 @@ echo ""
 echo "Starting taskchampion-sync-server..."
 docker compose -f "$PROJECT_DIR/docker-compose.test.yml" up -d
 
-# Wait for health
+# Wait for health — the server may return 404 on root, that's fine
 echo "Waiting for server to be ready..."
 for i in $(seq 1 30); do
-    if curl -s -o /dev/null "$SERVER_URL" 2>/dev/null; then
+    if curl -s -o /dev/null -w '' "$SERVER_URL/" 2>/dev/null; then
         echo "Server is ready!"
         break
     fi
@@ -48,20 +48,20 @@ done
 
 # Run tests
 echo ""
-echo "Running integration tests..."
+echo "Running unit and integration tests..."
+TEST_EXIT=0
 SYNC_TEST_SERVER_URL="$SERVER_URL" \
-    "$PROJECT_DIR/gradlew" -p "$PROJECT_DIR" test \
-        --tests "com.tasksquire.android.sync.integration.*" \
-        --info || TEST_EXIT=$?
+    "$PROJECT_DIR/gradlew" -p "$PROJECT_DIR" testDebugUnitTest \
+        --info 2>&1 | tail -50 || TEST_EXIT=$?
 
 # Tear down
 echo ""
 echo "Tearing down server..."
 docker compose -f "$PROJECT_DIR/docker-compose.test.yml" down
 
-if [ "${TEST_EXIT:-0}" -ne 0 ]; then
-    echo "FAILED: Integration tests failed"
+if [ "$TEST_EXIT" -ne 0 ]; then
+    echo "FAILED: Tests failed with exit code $TEST_EXIT"
     exit "$TEST_EXIT"
 fi
 
-echo "PASSED: All integration tests passed!"
+echo "PASSED: All tests passed!"
