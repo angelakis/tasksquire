@@ -14,7 +14,7 @@
 # Usage:
 #   SYNC_TEST_SERVER_URL=http://localhost:8080 ./scripts/test-cross-client.sh
 
-set -euo pipefail
+set -uo pipefail
 
 SERVER_URL="${SYNC_TEST_SERVER_URL:-http://localhost:8080}"
 CLIENT_ID="$(python3 -c 'import uuid; print(uuid.uuid4())' 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
@@ -58,13 +58,13 @@ fi
 
 # --- Configure Taskwarrior ---
 # Taskwarrior 3.x config keys:
-#   sync.server.origin  (the server URL; `sync.server.url` is a synonym in >=3.1)
+#   sync.server.url       (the server URL; replaces deprecated sync.server.origin)
 #   sync.server.client_id
 #   sync.encryption_secret  (note: NOT sync.server.encryption_secret)
 
 cat > "$TASKRC" <<EOF
 data.location=$TASKDATA
-sync.server.origin=$SERVER_URL
+sync.server.url=$SERVER_URL
 sync.server.client_id=$CLIENT_ID
 sync.encryption_secret=$SECRET
 confirmation=off
@@ -83,19 +83,32 @@ fail() {
     echo "  FAIL: $1"
 }
 
+# Helper: run task sync and report failure (does not abort the script).
+do_sync() {
+    local rc_file="${1:-$TASKRC}"
+    if ! TASKRC="$rc_file" task sync 2>&1; then
+        echo "  (task sync failed with exit code $?)"
+        return 1
+    fi
+    return 0
+}
+
 # --- Test 1: Taskwarrior creates a task and syncs ---
 
 echo ""
 echo "Test 1: Desktop -> Server (create task and sync)"
 
 task add "Buy groceries" project:home priority:H +shopping +errands 2>/dev/null
-task sync 2>/dev/null
 
-TASK_COUNT=$(task count 2>/dev/null || echo "0")
-if [ "$TASK_COUNT" -ge 1 ]; then
-    pass "Task created and synced ($TASK_COUNT tasks)"
+if do_sync; then
+    TASK_COUNT=$(task count 2>/dev/null || echo "0")
+    if [ "$TASK_COUNT" -ge 1 ]; then
+        pass "Task created and synced ($TASK_COUNT tasks)"
+    else
+        fail "Task count was $TASK_COUNT (expected >= 1)"
+    fi
 else
-    fail "Task count was $TASK_COUNT (expected >= 1)"
+    fail "task sync failed"
 fi
 
 # --- Test 2: Taskwarrior creates more tasks ---
@@ -105,13 +118,16 @@ echo "Test 2: Desktop -> Server (multiple tasks with various properties)"
 
 task add "Pay rent" due:2025-12-01 priority:M project:finance 2>/dev/null
 task add "Exercise" +health 2>/dev/null
-task sync 2>/dev/null
 
-TASK_COUNT=$(task count 2>/dev/null || echo "0")
-if [ "$TASK_COUNT" -ge 3 ]; then
-    pass "Multiple tasks synced ($TASK_COUNT tasks)"
+if do_sync; then
+    TASK_COUNT=$(task count 2>/dev/null || echo "0")
+    if [ "$TASK_COUNT" -ge 3 ]; then
+        pass "Multiple tasks synced ($TASK_COUNT tasks)"
+    else
+        fail "Expected >= 3 tasks, got $TASK_COUNT"
+    fi
 else
-    fail "Expected >= 3 tasks, got $TASK_COUNT"
+    fail "task sync failed"
 fi
 
 # --- Test 3: Complete a task and sync ---
@@ -120,13 +136,16 @@ echo ""
 echo "Test 3: Desktop -> Server (complete a task)"
 
 task 1 done 2>/dev/null
-task sync 2>/dev/null
 
-COMPLETED=$(task status:completed count 2>/dev/null || echo "0")
-if [ "$COMPLETED" -ge 1 ]; then
-    pass "Completed task synced ($COMPLETED completed)"
+if do_sync; then
+    COMPLETED=$(task status:completed count 2>/dev/null || echo "0")
+    if [ "$COMPLETED" -ge 1 ]; then
+        pass "Completed task synced ($COMPLETED completed)"
+    else
+        fail "Expected >= 1 completed tasks, got $COMPLETED"
+    fi
 else
-    fail "Expected >= 1 completed tasks, got $COMPLETED"
+    fail "task sync failed"
 fi
 
 # --- Test 4: Annotate a task and sync ---
@@ -136,9 +155,12 @@ echo "Test 4: Desktop -> Server (annotations)"
 
 # task 2 is "Pay rent" (task 1 was completed, so IDs shift)
 task 1 annotate "Remember to include utilities" 2>/dev/null
-task sync 2>/dev/null
 
-pass "Annotation added and synced"
+if do_sync; then
+    pass "Annotation added and synced"
+else
+    fail "task sync failed"
+fi
 
 # --- Test 5: Second Taskwarrior replica fetches and verifies ---
 
@@ -150,20 +172,22 @@ TASKRC2="$TEST_DIR/taskrc2"
 mkdir -p "$TASKDATA2"
 cat > "$TASKRC2" <<EOF
 data.location=$TASKDATA2
-sync.server.origin=$SERVER_URL
+sync.server.url=$SERVER_URL
 sync.server.client_id=$CLIENT_ID
 sync.encryption_secret=$SECRET
 confirmation=off
 verbose=nothing
 EOF
 
-TASKRC="$TASKRC2" task sync 2>/dev/null
-
-TASK_COUNT2=$(TASKRC="$TASKRC2" task count 2>/dev/null || echo "0")
-if [ "$TASK_COUNT2" -ge 2 ]; then
-    pass "Second replica fetched tasks ($TASK_COUNT2 tasks)"
+if do_sync "$TASKRC2"; then
+    TASK_COUNT2=$(TASKRC="$TASKRC2" task count 2>/dev/null || echo "0")
+    if [ "$TASK_COUNT2" -ge 2 ]; then
+        pass "Second replica fetched tasks ($TASK_COUNT2 tasks)"
+    else
+        fail "Second replica expected >= 2 tasks, got $TASK_COUNT2"
+    fi
 else
-    fail "Second replica expected >= 2 tasks, got $TASK_COUNT2"
+    fail "task sync failed for second replica"
 fi
 
 # Verify specific task properties survived the round-trip
@@ -180,15 +204,21 @@ echo ""
 echo "Test 6: Bidirectional sync"
 
 TASKRC="$TASKRC2" task add "Task from replica B" priority:L +replica_b 2>/dev/null
-TASKRC="$TASKRC2" task sync 2>/dev/null
 
-# First replica syncs and should see it
-TASKRC="$TASKRC" task sync 2>/dev/null
-REPLICA_B_TASK=$(TASKRC="$TASKRC" task description:"Task from replica B" count 2>/dev/null || echo "0")
-if [ "$REPLICA_B_TASK" -ge 1 ]; then
-    pass "Replica A sees task created by Replica B"
+if do_sync "$TASKRC2"; then
+    # First replica syncs and should see it
+    if do_sync "$TASKRC"; then
+        REPLICA_B_TASK=$(task description:"Task from replica B" count 2>/dev/null || echo "0")
+        if [ "$REPLICA_B_TASK" -ge 1 ]; then
+            pass "Replica A sees task created by Replica B"
+        else
+            fail "Replica A does not see task from Replica B"
+        fi
+    else
+        fail "task sync failed for first replica pull"
+    fi
 else
-    fail "Replica A does not see task from Replica B"
+    fail "task sync failed for second replica push"
 fi
 
 # --- Test 7: Third replica bootstraps (snapshot or version chain) ---
@@ -201,19 +231,22 @@ TASKRC3="$TEST_DIR/taskrc3"
 mkdir -p "$TASKDATA3"
 cat > "$TASKRC3" <<EOF
 data.location=$TASKDATA3
-sync.server.origin=$SERVER_URL
+sync.server.url=$SERVER_URL
 sync.server.client_id=$CLIENT_ID
 sync.encryption_secret=$SECRET
 confirmation=off
 verbose=nothing
 EOF
 
-TASKRC="$TASKRC3" task sync 2>/dev/null
-TASK_COUNT3=$(TASKRC="$TASKRC3" task count 2>/dev/null || echo "0")
-if [ "$TASK_COUNT3" -ge 2 ]; then
-    pass "Third replica bootstrapped ($TASK_COUNT3 tasks)"
+if do_sync "$TASKRC3"; then
+    TASK_COUNT3=$(TASKRC="$TASKRC3" task count 2>/dev/null || echo "0")
+    if [ "$TASK_COUNT3" -ge 2 ]; then
+        pass "Third replica bootstrapped ($TASK_COUNT3 tasks)"
+    else
+        fail "Third replica expected >= 2 tasks, got $TASK_COUNT3"
+    fi
 else
-    fail "Third replica expected >= 2 tasks, got $TASK_COUNT3"
+    fail "task sync failed for third replica"
 fi
 
 # --- Summary ---

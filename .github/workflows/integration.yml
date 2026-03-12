@@ -55,7 +55,7 @@ jobs:
           exit 1
 
       - name: Run unit and integration tests
-        run: ./gradlew testDebugUnitTest
+        run: ./gradlew testDebugUnitTest --stacktrace
 
   cross-client:
     name: Cross-Client Compatibility (Taskwarrior)
