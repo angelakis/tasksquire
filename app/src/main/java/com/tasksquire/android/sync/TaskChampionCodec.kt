@@ -22,18 +22,12 @@ object TaskChampionCodec {
                 is Operation.Delete -> JSONObject().apply {
                     put("Delete", JSONObject().apply {
                         put("uuid", op.uuid)
-                        // TaskChampion Rust expects an "old_task" map; we don't track
-                        // the previous task state so send an empty map.
-                        put("old_task", JSONObject())
                     })
                 }
                 is Operation.Update -> JSONObject().apply {
                     put("Update", JSONObject().apply {
                         put("uuid", op.uuid)
                         put("property", op.property)
-                        // TaskChampion Rust requires "old_value" (Option<String>).
-                        // We don't track previous values so always send null.
-                        put("old_value", JSONObject.NULL)
                         if (op.value == null) put("value", JSONObject.NULL) else put("value", op.value)
                         put("timestamp", Instant.ofEpochMilli(op.timestamp).toString())
                     })

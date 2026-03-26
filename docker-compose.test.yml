@@ -1,0 +1,20 @@
+# Docker Compose for running integration tests against taskchampion-sync-server.
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up -d
+#   SYNC_TEST_SERVER_URL=http://localhost:8080 ./gradlew testDebugUnitTest
+#   docker compose -f docker-compose.test.yml down
+#
+# Or use the helper script:
+#   ./scripts/test-integration.sh
+#
+# Pin the server version here to match the CI workflow.
+# Available tags: https://github.com/GothenburgBitFactory/taskchampion-sync-server/pkgs/container/taskchampion-sync-server
+
+services:
+  sync-server:
+    image: ghcr.io/gothenburgbitfactory/taskchampion-sync-server:${TASKCHAMPION_SYNC_SERVER_VERSION:-0.7.1}
+    ports:
+      - "8080:8080"
+    environment:
+      - RUST_LOG=info
