@@ -74,8 +74,8 @@ class SyncProtocolTest {
 
         assertNotNull(result)
         assertEquals(newVersion, result!!.first)
-        assertEquals(1, result.second.size)
-        assertTrue(result.second[0] is Operation.Create)
+        assertEquals(1, result!!.second.size)
+        assertTrue(result!!.second[0] is Operation.Create)
 
         // Verify request
         val request = server.takeRequest()
@@ -126,7 +126,7 @@ class SyncProtocolTest {
 
         assertNotNull(result)
         assertEquals(newVersion, result!!.newVersionId)
-        assertNull(result.snapshotUrgency)
+        assertNull(result!!.snapshotUrgency)
 
         // Verify request
         val request = server.takeRequest()
@@ -210,8 +210,8 @@ class SyncProtocolTest {
 
         assertNotNull(result)
         assertEquals(snapshotVersion, result!!.versionId)
-        assertEquals(1, result.tasks.size)
-        assertEquals("Test task", result.tasks["56e0be07-c61f-494c-a54c-bdcfdd52d2a7"]?.get("description"))
+        assertEquals(1, result!!.tasks.size)
+        assertEquals("Test task", result!!.tasks["56e0be07-c61f-494c-a54c-bdcfdd52d2a7"]?.get("description"))
 
         // Verify request path
         val request = server.takeRequest()
