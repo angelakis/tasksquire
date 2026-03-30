@@ -28,7 +28,11 @@ data class Task(
     val depends: String? = null, // comma-separated UUID list
     val entry: Long = System.currentTimeMillis(), // creation time
     val modified: Long = System.currentTimeMillis(),
+    val end: Long? = null, // epoch millis; set when status becomes completed or deleted
+    val start: Long? = null, // epoch millis; set when task is started/active
+    val until: Long? = null, // epoch millis; expiry date for recurring tasks
     val annotations: String? = null, // JSON array of {entry, description}
+    val extraProperties: String? = null, // JSON object of unknown properties for round-trip preservation
     val urgency: Double = 0.0,
     val isSynced: Boolean = false,
     val isModifiedLocally: Boolean = true

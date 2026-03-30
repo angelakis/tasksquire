@@ -6,6 +6,12 @@ import com.tasksquire.android.data.TaskStatus
 import org.json.JSONArray
 import org.json.JSONObject
 
+private val KNOWN_SCALAR_PROPERTIES = setOf(
+    "description", "status", "entry", "modified", "priority", "project",
+    "due", "wait", "scheduled", "recur", "end", "start", "until"
+)
+private val KNOWN_PROPERTY_PREFIXES = listOf("tag_", "dep_", "annotation_")
+
 /**
  * Converts between Task objects and sync Operations.
  */
@@ -33,6 +39,13 @@ object OperationBuilder {
         task.wait?.let { ops.add(Operation.Update(task.uuid, "wait", (it / 1000).toString(), now)) }
         task.scheduled?.let { ops.add(Operation.Update(task.uuid, "scheduled", (it / 1000).toString(), now)) }
         task.recur?.let { ops.add(Operation.Update(task.uuid, "recur", it, now)) }
+        task.end?.let { ops.add(Operation.Update(task.uuid, "end", (it / 1000).toString(), now)) }
+        task.start?.let { ops.add(Operation.Update(task.uuid, "start", (it / 1000).toString(), now)) }
+        task.until?.let { ops.add(Operation.Update(task.uuid, "until", (it / 1000).toString(), now)) }
+
+        parseExtraProperties(task.extraProperties)?.forEach { (key, value) ->
+            ops.add(Operation.Update(task.uuid, key, value, now))
+        }
 
         for (dep in task.getDependencyList()) {
             ops.add(Operation.Update(task.uuid, "dep_$dep", "", now))
@@ -71,6 +84,9 @@ object OperationBuilder {
         ops.add(Operation.Update(task.uuid, "wait", task.wait?.let { (it / 1000).toString() }, now))
         ops.add(Operation.Update(task.uuid, "scheduled", task.scheduled?.let { (it / 1000).toString() }, now))
         ops.add(Operation.Update(task.uuid, "recur", task.recur, now))
+        ops.add(Operation.Update(task.uuid, "end", task.end?.let { (it / 1000).toString() }, now))
+        ops.add(Operation.Update(task.uuid, "start", task.start?.let { (it / 1000).toString() }, now))
+        ops.add(Operation.Update(task.uuid, "until", task.until?.let { (it / 1000).toString() }, now))
 
         for (dep in task.getDependencyList()) {
             ops.add(Operation.Update(task.uuid, "dep_$dep", "", now))
@@ -132,6 +148,14 @@ object OperationBuilder {
 
         val annotations = buildAnnotationsJson(props)
 
+        val extra = props.entries
+            .filter { (key, _) ->
+                key !in KNOWN_SCALAR_PROPERTIES &&
+                KNOWN_PROPERTY_PREFIXES.none { key.startsWith(it) }
+            }
+            .associate { (k, v) -> k to v }
+        val extraJson = if (extra.isEmpty()) null else JSONObject(extra).toString()
+
         return Task(
             uuid = uuid,
             description = description,
@@ -146,7 +170,11 @@ object OperationBuilder {
             depends = depends,
             entry = parseTaskChampionTimestamp(props["entry"]) ?: System.currentTimeMillis(),
             modified = parseTaskChampionTimestamp(props["modified"]) ?: System.currentTimeMillis(),
+            end = parseTaskChampionTimestamp(props["end"]),
+            start = parseTaskChampionTimestamp(props["start"]),
+            until = parseTaskChampionTimestamp(props["until"]),
             annotations = annotations,
+            extraProperties = extraJson,
             isSynced = true,
             isModifiedLocally = false
         )
@@ -169,6 +197,10 @@ object OperationBuilder {
         task.wait?.let { props["wait"] = (it / 1000).toString() }
         task.scheduled?.let { props["scheduled"] = (it / 1000).toString() }
         task.recur?.let { props["recur"] = it }
+        task.end?.let { props["end"] = (it / 1000).toString() }
+        task.start?.let { props["start"] = (it / 1000).toString() }
+        task.until?.let { props["until"] = (it / 1000).toString() }
+        parseExtraProperties(task.extraProperties)?.forEach { (k, v) -> props[k] = v }
         for (dep in task.getDependencyList()) {
             props["dep_$dep"] = ""
         }
@@ -179,6 +211,25 @@ object OperationBuilder {
             props["annotation_$ts"] = desc
         }
         return props
+    }
+
+    /**
+     * Parse the stored extra-properties JSON object into a map.
+     */
+    internal fun parseExtraProperties(json: String?): Map<String, String>? {
+        if (json.isNullOrBlank()) return null
+        return try {
+            val obj = JSONObject(json)
+            val result = mutableMapOf<String, String>()
+            val keys = obj.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                result[k] = obj.getString(k)
+            }
+            result.ifEmpty { null }
+        } catch (_: Exception) {
+            null
+        }
     }
 
     /**
