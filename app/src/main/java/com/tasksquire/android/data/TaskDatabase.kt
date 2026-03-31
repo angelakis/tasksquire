@@ -8,7 +8,7 @@ import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 
-@Database(entities = [Task::class], version = 2, exportSchema = false)
+@Database(entities = [Task::class], version = 3, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class TaskDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
@@ -21,6 +21,14 @@ abstract class TaskDatabase : RoomDatabase() {
                 db.execSQL("ALTER TABLE tasks ADD COLUMN depends TEXT")
             }
         }
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE tasks ADD COLUMN end INTEGER")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN start INTEGER")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN until INTEGER")
+                db.execSQL("ALTER TABLE tasks ADD COLUMN extraProperties TEXT")
+            }
+        }
 
         fun getInstance(context: Context): TaskDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -29,7 +37,7 @@ abstract class TaskDatabase : RoomDatabase() {
                     TaskDatabase::class.java,
                     "tasksquire_database"
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance

@@ -41,10 +41,10 @@ interface TaskDao {
     @Query("DELETE FROM tasks")
     suspend fun deleteAllTasks()
 
-    @Query("UPDATE tasks SET status = 'COMPLETED', modified = :modifiedTime, isModifiedLocally = 1 WHERE uuid = :uuid")
+    @Query("UPDATE tasks SET status = 'COMPLETED', modified = :modifiedTime, end = :modifiedTime, isModifiedLocally = 1 WHERE uuid = :uuid")
     suspend fun completeTask(uuid: String, modifiedTime: Long = System.currentTimeMillis())
 
-    @Query("UPDATE tasks SET status = 'DELETED', modified = :modifiedTime, isModifiedLocally = 1 WHERE uuid = :uuid")
+    @Query("UPDATE tasks SET status = 'DELETED', modified = :modifiedTime, end = :modifiedTime, isModifiedLocally = 1 WHERE uuid = :uuid")
     suspend fun markTaskDeleted(uuid: String, modifiedTime: Long = System.currentTimeMillis())
 
     @Query("UPDATE tasks SET isSynced = 1, isModifiedLocally = 0 WHERE uuid = :uuid")

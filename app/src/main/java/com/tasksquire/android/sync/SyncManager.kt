@@ -354,6 +354,9 @@ class SyncManager(
             "recur" -> task.copy(recur = op.value)
             "entry" -> task.copy(entry = parseTaskChampionTimestamp(op.value) ?: task.entry)
             "modified" -> task.copy(modified = parseTaskChampionTimestamp(op.value) ?: task.modified)
+            "end" -> task.copy(end = parseTaskChampionTimestamp(op.value))
+            "start" -> task.copy(start = parseTaskChampionTimestamp(op.value))
+            "until" -> task.copy(until = parseTaskChampionTimestamp(op.value))
             else -> {
                 when {
                     op.property.startsWith("tag_") -> {
@@ -401,7 +404,19 @@ class SyncManager(
                         val jsonStr = if (annotations.isEmpty()) null else JSONArray(annotations).toString()
                         task.copy(annotations = jsonStr)
                     }
-                    else -> task
+                    else -> {
+                        // Preserve unknown properties for snapshot round-trips
+                        val extras = OperationBuilder.parseExtraProperties(task.extraProperties)
+                            ?.toMutableMap() ?: mutableMapOf()
+                        if (op.value != null) {
+                            extras[op.property] = op.value
+                        } else {
+                            extras.remove(op.property)
+                        }
+                        val extraJson = if (extras.isEmpty()) null
+                            else JSONObject(extras.toMap<String, String>()).toString()
+                        task.copy(extraProperties = extraJson)
+                    }
                 }
             }
         }
