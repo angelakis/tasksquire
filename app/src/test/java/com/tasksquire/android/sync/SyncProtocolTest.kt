@@ -145,17 +145,38 @@ class SyncProtocolTest {
     }
 
     @Test
-    fun `uploadOperations returns null on 409 conflict`() {
-        server.enqueue(MockResponse().setResponseCode(409))
+    fun `uploadOperations throws SyncConflictException on 409`() {
+        val expectedParent = UUID.randomUUID().toString()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(409)
+                .setHeader("X-Parent-Version-Id", expectedParent)
+        )
 
         val ops = listOf(Operation.Create(UUID.randomUUID().toString()))
-        val result = runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
-
-        assertNull("Should return null on 409 conflict", result)
+        try {
+            runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
+            fail("Should have thrown SyncConflictException")
+        } catch (e: SyncConflictException) {
+            assertEquals(expectedParent, e.expectedParentVersionId)
+        }
     }
 
     @Test
-    fun `uploadOperations parses X-Snapshot-Request header`() {
+    fun `uploadOperations SyncConflictException with missing header`() {
+        server.enqueue(MockResponse().setResponseCode(409))
+
+        val ops = listOf(Operation.Create(UUID.randomUUID().toString()))
+        try {
+            runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
+            fail("Should have thrown SyncConflictException")
+        } catch (e: SyncConflictException) {
+            assertNull("Missing header should give null expectedParentVersionId", e.expectedParentVersionId)
+        }
+    }
+
+    @Test
+    fun `uploadOperations parses X-Snapshot-Request urgency high`() {
         val newVersion = UUID.randomUUID().toString()
         server.enqueue(
             MockResponse()
@@ -168,7 +189,40 @@ class SyncProtocolTest {
         val result = runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
 
         assertNotNull(result)
-        assertEquals("urgency=high", result!!.snapshotUrgency)
+        assertEquals("high", result!!.snapshotUrgency)
+    }
+
+    @Test
+    fun `uploadOperations parses X-Snapshot-Request urgency low`() {
+        val newVersion = UUID.randomUUID().toString()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("X-Version-Id", newVersion)
+                .setHeader("X-Snapshot-Request", "urgency=low")
+        )
+
+        val ops = listOf(Operation.Create(UUID.randomUUID().toString()))
+        val result = runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
+
+        assertNotNull(result)
+        assertEquals("low", result!!.snapshotUrgency)
+    }
+
+    @Test
+    fun `uploadOperations returns null urgency when header absent`() {
+        val newVersion = UUID.randomUUID().toString()
+        server.enqueue(
+            MockResponse()
+                .setResponseCode(200)
+                .setHeader("X-Version-Id", newVersion)
+        )
+
+        val ops = listOf(Operation.Create(UUID.randomUUID().toString()))
+        val result = runBlocking { client.uploadOperations(UUID.randomUUID().toString(), ops) }
+
+        assertNotNull(result)
+        assertNull(result!!.snapshotUrgency)
     }
 
     // --- Snapshot endpoints ---

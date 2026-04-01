@@ -35,18 +35,21 @@ object TaskChampionCodec {
             }
             ops.put(opObj)
         }
-        return ops.toString().toByteArray(Charsets.UTF_8)
+        // Wire format is {"operations": [...]} (Version struct in TaskChampion),
+        // NOT a bare JSON array.
+        val version = JSONObject()
+        version.put("operations", ops)
+        return version.toString().toByteArray(Charsets.UTF_8)
     }
 
     fun decodeHistorySegment(bytes: ByteArray): List<Operation> {
         val raw = bytes.toString(Charsets.UTF_8)
-        // History segments are a plain JSON array (Vec<Operation> serialized by
-        // serde in the Rust client). Try that first, then fall back to a wrapped
-        // {"operations": [...]} envelope in case the server proxies through one.
+        // Wire format is {"operations": [...]} (Version struct in TaskChampion).
+        // Try that first, then fall back to a bare JSON array for tolerance.
         val ops = try {
-            JSONArray(raw)
-        } catch (_: Exception) {
             JSONObject(raw).getJSONArray("operations")
+        } catch (_: Exception) {
+            JSONArray(raw)
         }
         return buildList {
             for (i in 0 until ops.length()) {
@@ -78,18 +81,15 @@ object TaskChampionCodec {
     }
 
     fun encodeSnapshot(snapshot: Snapshot): ByteArray {
-        // TaskChampion Rust expects Vec<(Uuid, TaskMap)> which serde deserializes
-        // from a JSON array of [uuid, {properties}] tuples, NOT a JSON object.
-        val json = JSONArray()
+        // TaskChampion snapshot format is a JSON object mapping task UUIDs to
+        // their property maps: {"<uuid>": {"key": "value", ...}, ...}
+        val json = JSONObject()
         for ((uuid, props) in snapshot.tasks) {
             val taskObj = JSONObject()
             for ((k, v) in props) {
                 taskObj.put(k, v)
             }
-            val entry = JSONArray()
-            entry.put(uuid)
-            entry.put(taskObj)
-            json.put(entry)
+            json.put(uuid, taskObj)
         }
         val raw = json.toString().toByteArray(Charsets.UTF_8)
         val baos = ByteArrayOutputStream()
