@@ -250,9 +250,13 @@ class SyncIntegrationTest {
             Operation.Update(taskB, "description", "Task from B", System.currentTimeMillis())
         )
 
-        // This should return null (409 conflict) because nilVersion is no longer the latest
-        val resultB = runBlocking { replicaB.uploadOperations(nilVersion, opsB) }
-        assertNull("Replica B should get 409 conflict when pushing against stale parent", resultB)
+        // This should throw SyncConflictException (409) because nilVersion is no longer the latest
+        try {
+            runBlocking { replicaB.uploadOperations(nilVersion, opsB) }
+            fail("Replica B should get 409 conflict when pushing against stale parent")
+        } catch (e: SyncConflictException) {
+            // Expected
+        }
 
         // Replica B should be able to push after pulling replica A's version
         val fetchResult = runBlocking { replicaB.getOperationsSince(nilVersion) }!!
@@ -311,8 +315,12 @@ class SyncIntegrationTest {
         val opsB = listOf(
             Operation.Update(taskUuid, "status", "completed", now)
         )
-        val resultB = runBlocking { replicaB.uploadOperations(v1, opsB) }
-        assertNull("Should get 409 since v1 is stale", resultB)
+        try {
+            runBlocking { replicaB.uploadOperations(v1, opsB) }
+            fail("Should get 409 since v1 is stale")
+        } catch (e: SyncConflictException) {
+            // Expected
+        }
 
         // Replica B pulls v2 (replica A's changes)
         val serverOps = runBlocking { replicaB.getOperationsSince(v1) }!!

@@ -145,12 +145,16 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
             when (resp.code) {
                 200 -> {
                     val versionId = requiredUuidHeader(resp, "X-Version-Id")
-                    // The server may request a snapshot via X-Snapshot-Request: low|high.
-                    // Mobile clients should at minimum honour "high" urgency.
-                    val snapshotUrgency = resp.header("X-Snapshot-Request")?.trim()?.lowercase()
+                    // The server sends X-Snapshot-Request: urgency=low or urgency=high.
+                    val snapshotUrgency = parseSnapshotUrgency(resp.header("X-Snapshot-Request"))
                     UploadResult(versionId, snapshotUrgency)
                 }
-                409 -> null // Conflict - another client pushed first
+                409 -> {
+                    // Conflict - another client pushed first.
+                    // Read X-Parent-Version-Id for divergence detection.
+                    val expectedParent = resp.header("X-Parent-Version-Id")?.trim()
+                    throw SyncConflictException(expectedParent)
+                }
                 else -> {
                     val bodyText = resp.body?.string()
                     val message = unexpectedStatusMessage(resp.code, "uploading operations", bodyText)
@@ -182,6 +186,21 @@ class TaskChampionSyncClient(private val config: SyncServerConfig) {
             throw SyncException(
                 "Unexpected content-type '${resp.header("Content-Type")}' while $action (expected $expected)"
             )
+        }
+    }
+
+    /**
+     * Parse the X-Snapshot-Request header value.
+     * The server sends "urgency=low" or "urgency=high".
+     * Returns "low", "high", or null.
+     */
+    private fun parseSnapshotUrgency(header: String?): String? {
+        if (header == null) return null
+        val trimmed = header.trim().lowercase()
+        return when {
+            trimmed == "urgency=high" -> "high"
+            trimmed == "urgency=low" -> "low"
+            else -> null
         }
     }
 
@@ -217,3 +236,14 @@ open class SyncException(message: String, cause: Throwable? = null) : Exception(
  * The caller should reset its stored version and re-sync from scratch.
  */
 class SyncVersionNotFoundException(message: String, cause: Throwable? = null) : SyncException(message, cause)
+
+/**
+ * Thrown on HTTP 409 Conflict when uploading operations.
+ * [expectedParentVersionId] is the X-Parent-Version-Id header from the response,
+ * used for divergence detection.
+ */
+class SyncConflictException(
+    val expectedParentVersionId: String?,
+    message: String = "Version conflict (409)",
+    cause: Throwable? = null
+) : SyncException(message, cause)

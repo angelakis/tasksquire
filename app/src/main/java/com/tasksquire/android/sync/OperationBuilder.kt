@@ -27,7 +27,10 @@ object OperationBuilder {
         ops.add(Operation.Create(uuid = task.uuid))
 
         ops.add(Operation.Update(task.uuid, "description", task.description, now))
-        ops.add(Operation.Update(task.uuid, "status", task.status.name.lowercase(), now))
+        // TaskChampion only recognises: pending, completed, deleted, recurring.
+        // WAITING is a local UI concept; on the wire it is "pending" with a "wait" property.
+        val wireStatus = if (task.status == TaskStatus.WAITING) "pending" else task.status.name.lowercase()
+        ops.add(Operation.Update(task.uuid, "status", wireStatus, now))
         ops.add(Operation.Update(task.uuid, "entry", (task.entry / 1000).toString(), now))
         ops.add(Operation.Update(task.uuid, "modified", (task.modified / 1000).toString(), now))
 
@@ -71,7 +74,8 @@ object OperationBuilder {
         val now = task.modified
 
         ops.add(Operation.Update(task.uuid, "description", task.description, now))
-        ops.add(Operation.Update(task.uuid, "status", task.status.name.lowercase(), now))
+        val wireStatus = if (task.status == TaskStatus.WAITING) "pending" else task.status.name.lowercase()
+        ops.add(Operation.Update(task.uuid, "status", wireStatus, now))
         ops.add(Operation.Update(task.uuid, "modified", (now / 1000).toString(), now))
 
         ops.add(Operation.Update(
@@ -186,7 +190,7 @@ object OperationBuilder {
     fun taskToProperties(task: Task): Map<String, String> {
         val props = mutableMapOf<String, String>()
         props["description"] = task.description
-        props["status"] = task.status.name.lowercase()
+        props["status"] = if (task.status == TaskStatus.WAITING) "pending" else task.status.name.lowercase()
         props["entry"] = (task.entry / 1000).toString()
         props["modified"] = (task.modified / 1000).toString()
         if (task.priority != TaskPriority.NONE) {

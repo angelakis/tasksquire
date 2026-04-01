@@ -9,11 +9,12 @@ import org.junit.Test
  * Tests for TaskChampion operation and snapshot serialization/deserialization.
  *
  * Verifies:
- * - Operation JSON format matches spec (Section 4.3)
+ * - Operation JSON format matches spec (Section 3.1)
+ * - Version wire format: {"operations": [...]} wrapper (Section 3.2)
  * - Sync operations do NOT include old_task or old_value
  * - Null value handling (property deletion)
  * - Timestamp format (RFC3339 with Z suffix)
- * - Snapshot encoding/decoding (array-of-tuples format)
+ * - Snapshot encoding/decoding (JSON object format, Section 6.1)
  * - Round-trip consistency
  */
 class TaskChampionCodecTest {
@@ -24,8 +25,10 @@ class TaskChampionCodecTest {
     fun `encodeHistorySegment Create operation format`() {
         val ops = listOf(Operation.Create("56e0be07-c61f-494c-a54c-bdcfdd52d2a7"))
         val bytes = TaskChampionCodec.encodeHistorySegment(ops)
-        val json = JSONArray(bytes.toString(Charsets.UTF_8))
+        val version = JSONObject(bytes.toString(Charsets.UTF_8))
 
+        assertTrue("Should have operations wrapper", version.has("operations"))
+        val json = version.getJSONArray("operations")
         assertEquals(1, json.length())
         val opObj = json.getJSONObject(0)
         assertTrue("Should have Create key", opObj.has("Create"))
@@ -37,7 +40,7 @@ class TaskChampionCodecTest {
     fun `encodeHistorySegment Delete operation does NOT include old_task`() {
         val ops = listOf(Operation.Delete("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"))
         val bytes = TaskChampionCodec.encodeHistorySegment(ops)
-        val json = JSONArray(bytes.toString(Charsets.UTF_8))
+        val json = JSONObject(bytes.toString(Charsets.UTF_8)).getJSONArray("operations")
 
         val opObj = json.getJSONObject(0)
         val delete = opObj.getJSONObject("Delete")
@@ -56,7 +59,7 @@ class TaskChampionCodecTest {
             )
         )
         val bytes = TaskChampionCodec.encodeHistorySegment(ops)
-        val json = JSONArray(bytes.toString(Charsets.UTF_8))
+        val json = JSONObject(bytes.toString(Charsets.UTF_8)).getJSONArray("operations")
 
         val opObj = json.getJSONObject(0)
         val update = opObj.getJSONObject("Update")
@@ -80,7 +83,7 @@ class TaskChampionCodecTest {
             )
         )
         val bytes = TaskChampionCodec.encodeHistorySegment(ops)
-        val json = JSONArray(bytes.toString(Charsets.UTF_8))
+        val json = JSONObject(bytes.toString(Charsets.UTF_8)).getJSONArray("operations")
 
         val update = json.getJSONObject(0).getJSONObject("Update")
         assertTrue("Null value should be JSON null", update.isNull("value"))
@@ -95,7 +98,7 @@ class TaskChampionCodecTest {
             Operation.Delete("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
         )
         val bytes = TaskChampionCodec.encodeHistorySegment(ops)
-        val json = JSONArray(bytes.toString(Charsets.UTF_8))
+        val json = JSONObject(bytes.toString(Charsets.UTF_8)).getJSONArray("operations")
 
         assertEquals(4, json.length())
         assertTrue(json.getJSONObject(0).has("Create"))
@@ -107,7 +110,17 @@ class TaskChampionCodecTest {
     // --- History Segment Decoding ---
 
     @Test
-    fun `decodeHistorySegment Create operation`() {
+    fun `decodeHistorySegment Create operation wrapped format`() {
+        val json = """{"operations":[{"Create":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7"}}]}"""
+        val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
+
+        assertEquals(1, ops.size)
+        val op = ops[0] as Operation.Create
+        assertEquals("56e0be07-c61f-494c-a54c-bdcfdd52d2a7", op.uuid)
+    }
+
+    @Test
+    fun `decodeHistorySegment Create operation bare array fallback`() {
         val json = """[{"Create":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7"}}]"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
@@ -118,7 +131,7 @@ class TaskChampionCodecTest {
 
     @Test
     fun `decodeHistorySegment Delete operation`() {
-        val json = """[{"Delete":{"uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}}]"""
+        val json = """{"operations":[{"Delete":{"uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}}]}"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
         assertEquals(1, ops.size)
@@ -129,7 +142,7 @@ class TaskChampionCodecTest {
     @Test
     fun `decodeHistorySegment Delete with old_task field is tolerated`() {
         // Rust may include old_task in serialized operations; we should tolerate it
-        val json = """[{"Delete":{"uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","old_task":{"description":"Old task"}}}]"""
+        val json = """{"operations":[{"Delete":{"uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","old_task":{"description":"Old task"}}}]}"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
         assertEquals(1, ops.size)
@@ -139,7 +152,7 @@ class TaskChampionCodecTest {
 
     @Test
     fun `decodeHistorySegment Update operation`() {
-        val json = """[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"description","value":"Buy groceries","timestamp":"2024-01-15T10:30:00Z"}}]"""
+        val json = """{"operations":[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"description","value":"Buy groceries","timestamp":"2024-01-15T10:30:00Z"}}]}"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
         assertEquals(1, ops.size)
@@ -152,7 +165,7 @@ class TaskChampionCodecTest {
 
     @Test
     fun `decodeHistorySegment Update with null value`() {
-        val json = """[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"start","value":null,"timestamp":"2024-01-15T10:30:00Z"}}]"""
+        val json = """{"operations":[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"start","value":null,"timestamp":"2024-01-15T10:30:00Z"}}]}"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
         assertEquals(1, ops.size)
@@ -162,7 +175,7 @@ class TaskChampionCodecTest {
 
     @Test
     fun `decodeHistorySegment Update with old_value field is tolerated`() {
-        val json = """[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"description","old_value":"Old desc","value":"New desc","timestamp":"2024-01-15T10:30:00Z"}}]"""
+        val json = """{"operations":[{"Update":{"uuid":"56e0be07-c61f-494c-a54c-bdcfdd52d2a7","property":"description","old_value":"Old desc","value":"New desc","timestamp":"2024-01-15T10:30:00Z"}}]}"""
         val ops = TaskChampionCodec.decodeHistorySegment(json.toByteArray())
 
         assertEquals(1, ops.size)
@@ -214,7 +227,7 @@ class TaskChampionCodecTest {
     // --- Snapshot Encoding/Decoding ---
 
     @Test
-    fun `snapshot encodes as array of tuples`() {
+    fun `snapshot encodes as JSON object mapping UUIDs to properties`() {
         val snapshot = Snapshot(
             versionId = "11111111-2222-3333-4444-555555555555",
             tasks = mapOf(
@@ -265,9 +278,9 @@ class TaskChampionCodecTest {
     }
 
     @Test
-    fun `snapshot decode handles legacy object format`() {
-        // Legacy format: {uuid: {properties}, ...} instead of [[uuid, {props}], ...]
-        val legacyJson = """{"56e0be07-c61f-494c-a54c-bdcfdd52d2a7":{"description":"Legacy task","status":"pending"}}"""
+    fun `snapshot decode handles legacy array-of-tuples format`() {
+        // Legacy format: [[uuid, {properties}], ...] instead of {uuid: {props}, ...}
+        val legacyJson = """[["56e0be07-c61f-494c-a54c-bdcfdd52d2a7",{"description":"Legacy task","status":"pending"}]]"""
         val compressed = deflateCompress(legacyJson.toByteArray(Charsets.UTF_8))
 
         val decoded = TaskChampionCodec.decodeSnapshot("ver-1", compressed)

@@ -37,6 +37,7 @@ class SyncManager(
         private val KEY_AUTO_SYNC_ENABLED = booleanPreferencesKey("auto_sync_enabled")
         private const val NULL_VERSION_ID = "00000000-0000-0000-0000-000000000000"
         private const val MAX_SYNC_RETRIES = 3
+        private const val MAX_BATCH_BYTES = 1_000_000 // ~1MB per version, matching TaskChampion
     }
 
     suspend fun getServerConfig(): SyncServerConfig? {
@@ -205,52 +206,52 @@ class SyncManager(
             log(SyncLogLevel.INFO, "Applied ${operations.size} server operations (version $newVersionId)")
         }
 
-        // Phase 2: Push local changes to server
+        // Phase 2: Push local changes to server in batches of ≤1MB
         if (localOps.isEmpty()) {
             return SyncResult.Success(serverTasksReceived, 0)
         }
 
-        log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations")
-        val uploadResult = try {
-            client.uploadOperations(lastVersion, localOps)
-        } catch (e: SyncVersionNotFoundException) {
-            log(SyncLogLevel.WARN, "Server does not recognise version $lastVersion, resetting sync state")
-            saveLastVersion(NULL_VERSION_ID)
-            return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
-        } catch (e: SyncException) {
-            return SyncResult.Error("Failed to upload operations: ${e.message}", e)
-        }
+        val batches = batchOperations(localOps, MAX_BATCH_BYTES)
+        log(SyncLogLevel.INFO, "Uploading ${localOps.size} local operations in ${batches.size} batch(es)")
 
-        if (uploadResult == null) {
-            // 409 Conflict — another client pushed first.
-            // Check for consecutive 409s with the same parent (divergence detection).
-            val expectedParent = lastVersion // We tried to push against this version
-            if (expectedParent == lastConflictParent) {
-                log(SyncLogLevel.WARN, "Two consecutive 409s with same parent, recovering via snapshot")
-                handleSnapshotRecovery(client)
-                return SyncResult.Error("Divergence detected, recovered via snapshot. Re-sync needed.")
+        for (batch in batches) {
+            val uploadResult = try {
+                client.uploadOperations(lastVersion, batch)
+            } catch (e: SyncConflictException) {
+                // 409 Conflict — another client pushed first.
+                // Use X-Parent-Version-Id from response for divergence detection.
+                val expectedParent = e.expectedParentVersionId
+                if (expectedParent != null && expectedParent == lastConflictParent) {
+                    log(SyncLogLevel.WARN, "Two consecutive 409s with same parent, recovering via snapshot")
+                    handleSnapshotRecovery(client)
+                    return SyncResult.Error("Divergence detected, recovered via snapshot. Re-sync needed.")
+                }
+                lastConflictParent = expectedParent
+                log(SyncLogLevel.WARN, "Version conflict during upload, will retry")
+                return SyncResult.Error("Version conflict, retrying...")
+            } catch (e: SyncVersionNotFoundException) {
+                log(SyncLogLevel.WARN, "Server does not recognise version $lastVersion, resetting sync state")
+                saveLastVersion(NULL_VERSION_ID)
+                return SyncResult.Error("Server version mismatch, resetting sync state: ${e.message}", e)
+            } catch (e: SyncException) {
+                return SyncResult.Error("Failed to upload operations: ${e.message}", e)
             }
-            lastConflictParent = expectedParent
-            log(SyncLogLevel.WARN, "Version conflict during upload, will retry")
-            return SyncResult.Error("Version conflict, retrying...")
-        }
 
-        val newVersionId = uploadResult.newVersionId
+            val newVersionId = uploadResult!!.newVersionId
+            lastVersion = newVersionId
+            saveLastVersion(newVersionId)
+
+            // Upload a snapshot when the server requests one
+            val snapshotUrgency = uploadResult.snapshotUrgency
+            if (snapshotUrgency == "high" || snapshotUrgency == "low") {
+                log(SyncLogLevel.INFO, "Server requested snapshot (urgency=$snapshotUrgency)")
+                uploadSnapshot(client, newVersionId)
+            }
+        }
 
         // Mark all uploaded tasks as synced
         for (task in modifiedTasks) {
             repository.markTaskSynced(task.uuid)
-        }
-        saveLastVersion(newVersionId)
-
-        // Upload a snapshot when the server requests one (mobile clients honour "high" urgency)
-        // or when we've just sent a large batch of operations.
-        val snapshotUrgency = uploadResult.snapshotUrgency
-        if (snapshotUrgency == "high" || snapshotUrgency == "low" || localOps.size > 20) {
-            if (snapshotUrgency != null) {
-                log(SyncLogLevel.INFO, "Server requested snapshot (urgency=$snapshotUrgency)")
-            }
-            uploadSnapshot(client, newVersionId)
         }
 
         return SyncResult.Success(serverTasksReceived, modifiedTasks.size)
@@ -449,6 +450,32 @@ class SyncManager(
             // Snapshot upload failure is non-fatal; sync already succeeded
             log(SyncLogLevel.WARN, "Snapshot upload failed: ${e.message}")
         }
+    }
+
+    /**
+     * Split operations into batches whose serialized JSON size is at most [maxBytes].
+     * Each batch always contains at least one operation even if it exceeds the limit.
+     */
+    private fun batchOperations(ops: List<Operation>, maxBytes: Int): List<List<Operation>> {
+        if (ops.isEmpty()) return emptyList()
+        val batches = mutableListOf<List<Operation>>()
+        var currentBatch = mutableListOf<Operation>()
+        var currentSize = 0
+
+        for (op in ops) {
+            val opSize = TaskChampionCodec.encodeHistorySegment(listOf(op)).size
+            if (currentBatch.isNotEmpty() && currentSize + opSize > maxBytes) {
+                batches.add(currentBatch)
+                currentBatch = mutableListOf()
+                currentSize = 0
+            }
+            currentBatch.add(op)
+            currentSize += opSize
+        }
+        if (currentBatch.isNotEmpty()) {
+            batches.add(currentBatch)
+        }
+        return batches
     }
 
     private suspend fun log(level: SyncLogLevel, message: String) {

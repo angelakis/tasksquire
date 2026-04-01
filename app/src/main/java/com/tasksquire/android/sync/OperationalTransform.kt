@@ -84,11 +84,13 @@ object OperationalTransform {
                 TransformResult(null, null)
             }
             is Operation.Delete -> {
-                // Server creates, local deletes: server no-op, local delete passes through
-                TransformResult(null, localOp)
+                // Server creates, local deletes: prefer Create over Delete.
+                // Server Create survives, local Delete becomes no-op.
+                TransformResult(serverOp, null)
             }
             is Operation.Update -> {
-                // Server creates, local updates: server no-op, local update passes through
+                // Server creates, local updates: prefer Update.
+                // Server no-op, local Update passes through.
                 TransformResult(null, localOp)
             }
         }
@@ -97,15 +99,17 @@ object OperationalTransform {
     private fun transformServerDelete(serverOp: Operation.Delete, localOp: Operation): TransformResult {
         return when (localOp) {
             is Operation.Create -> {
-                // Server deletes, local creates: server delete passes, local no-op
-                TransformResult(serverOp, null)
+                // Server deletes, local creates: prefer Create over Delete.
+                // Server Delete becomes no-op, local Create survives.
+                TransformResult(null, localOp)
             }
             is Operation.Delete -> {
                 // Both delete: both become no-ops
                 TransformResult(null, null)
             }
             is Operation.Update -> {
-                // Server deletes, local updates: server delete passes, local no-op (task is deleted)
+                // Server deletes, local updates: prefer Delete.
+                // Server Delete passes, local Update becomes no-op.
                 TransformResult(serverOp, null)
             }
         }
@@ -125,8 +129,12 @@ object OperationalTransform {
                 if (serverOp.property != localOp.property) {
                     // Different properties: both pass through unchanged
                     TransformResult(serverOp, localOp)
+                } else if (serverOp.value == localOp.value) {
+                    // Same property, same value: both become no-ops (same effect)
+                    TransformResult(null, null)
                 } else {
-                    // Same property: later timestamp wins; ties go to server
+                    // Same property, different values: later timestamp wins;
+                    // ties go to server (op1)
                     if (serverOp.timestamp >= localOp.timestamp) {
                         // Server wins
                         TransformResult(serverOp, null)

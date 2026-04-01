@@ -61,14 +61,14 @@ class OperationalTransformTest {
     // --- Same UUID: Create/Delete ---
 
     @Test
-    fun `Create vs Delete same UUID - server no-op, local passes`() {
+    fun `Create vs Delete same UUID - prefer Create over Delete`() {
         val server = Operation.Create(uuid1)
         val local = Operation.Delete(uuid1)
 
         val result = OperationalTransform.transform(server, local)
 
-        assertNull("Server Create should become no-op", result.serverOp)
-        assertEquals(local, result.localOp)
+        assertEquals("Server Create should survive (Create wins over Delete)", server, result.serverOp)
+        assertNull("Local Delete should become no-op", result.localOp)
     }
 
     // --- Same UUID: Create/Update ---
@@ -87,14 +87,14 @@ class OperationalTransformTest {
     // --- Same UUID: Delete/Create ---
 
     @Test
-    fun `Delete vs Create same UUID - server passes, local no-op`() {
+    fun `Delete vs Create same UUID - prefer Create over Delete`() {
         val server = Operation.Delete(uuid1)
         val local = Operation.Create(uuid1)
 
         val result = OperationalTransform.transform(server, local)
 
-        assertEquals(server, result.serverOp)
-        assertNull("Local Create should become no-op", result.localOp)
+        assertNull("Server Delete should become no-op (Create wins over Delete)", result.serverOp)
+        assertEquals("Local Create should survive", local, result.localOp)
     }
 
     // --- Same UUID: Delete/Delete ---
@@ -199,6 +199,30 @@ class OperationalTransformTest {
 
         assertEquals("Server should win on timestamp tie", server, result.serverOp)
         assertNull("Local should become no-op on timestamp tie", result.localOp)
+    }
+
+    // --- Same UUID: Update/Update same property, same value ---
+
+    @Test
+    fun `Update vs Update same property same value - both become no-ops`() {
+        val server = Operation.Update(uuid1, "description", "Same text", ts1)
+        val local = Operation.Update(uuid1, "description", "Same text", ts2)
+
+        val result = OperationalTransform.transform(server, local)
+
+        assertNull("Server should become no-op (same value)", result.serverOp)
+        assertNull("Local should become no-op (same value)", result.localOp)
+    }
+
+    @Test
+    fun `Update vs Update same property both null value - both become no-ops`() {
+        val server = Operation.Update(uuid1, "start", null, ts1)
+        val local = Operation.Update(uuid1, "start", null, ts2)
+
+        val result = OperationalTransform.transform(server, local)
+
+        assertNull("Server should become no-op (same null value)", result.serverOp)
+        assertNull("Local should become no-op (same null value)", result.localOp)
     }
 
     // --- Same UUID: Update/Update same property with null values ---
@@ -354,8 +378,8 @@ class OperationalTransformTest {
         val (transformedServer, transformedLocal) = OperationalTransform.rebase(serverOps, localOps)
 
         // Server Create(uuid1) vs Local Create(uuid1) => both no-op
-        // Server Update(uuid2) vs Local Delete(uuid2) => server no-op, local delete passes
-        assertEquals("Server Update(uuid2) should be eliminated by local Delete", 0, transformedServer.size)
+        // Server Update(uuid2) vs Local Delete(uuid2) => server Update no-op (Delete wins), local Delete passes
+        assertEquals("Server ops should be eliminated", 0, transformedServer.size)
         assertEquals("Local Delete(uuid2) should survive", 1, transformedLocal.size)
         assertTrue(transformedLocal[0] is Operation.Delete)
     }
