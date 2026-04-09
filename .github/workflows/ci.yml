@@ -24,6 +24,5 @@ jobs:
       - name: Build debug APK
         run: ./gradlew assembleDebug
 
-      # TODO: Re-enable once sync tests are fixed
-      # - name: Run unit tests
-      #   run: ./gradlew test
+      - name: Run unit tests
+        run: ./gradlew test

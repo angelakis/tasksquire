@@ -114,13 +114,13 @@ class SyncIntegrationTest {
         val fetchResult = runBlocking { client.getOperationsSince(nilVersion) }
         assertNotNull("Should get version back", fetchResult)
         assertEquals(versionId, fetchResult!!.first)
-        assertEquals(4, fetchResult.second.size)
+        assertEquals(4, fetchResult!!.second.size)
 
         // Verify operations match what we sent
-        val create = fetchResult.second[0] as Operation.Create
+        val create = fetchResult!!.second[0] as Operation.Create
         assertEquals(taskUuid, create.uuid)
 
-        val descUpdate = fetchResult.second[1] as Operation.Update
+        val descUpdate = fetchResult!!.second[1] as Operation.Update
         assertEquals(taskUuid, descUpdate.uuid)
         assertEquals("description", descUpdate.property)
         assertEquals("Integration test task", descUpdate.value)
@@ -161,8 +161,8 @@ class SyncIntegrationTest {
         val fetched = runBlocking { client.fetchSnapshot() }
         assertNotNull("Should get snapshot back", fetched)
         assertEquals(1, fetched!!.tasks.size)
-        assertEquals("Snapshot test", fetched.tasks[taskUuid]?.get("description"))
-        assertEquals("pending", fetched.tasks[taskUuid]?.get("status"))
+        assertEquals("Snapshot test", fetched!!.tasks[taskUuid]?.get("description"))
+        assertEquals("pending", fetched!!.tasks[taskUuid]?.get("status"))
     }
 
     // --- Multi-version chain ---
@@ -223,9 +223,9 @@ class SyncIntegrationTest {
         val fetchResult = runBlocking { replicaB.getOperationsSince(nilVersion) }
         assertNotNull(fetchResult)
         assertEquals(resultA.newVersionId, fetchResult!!.first)
-        assertEquals(3, fetchResult.second.size)
+        assertEquals(3, fetchResult!!.second.size)
 
-        val create = fetchResult.second[0] as Operation.Create
+        val create = fetchResult!!.second[0] as Operation.Create
         assertEquals(taskUuid, create.uuid)
     }
 
