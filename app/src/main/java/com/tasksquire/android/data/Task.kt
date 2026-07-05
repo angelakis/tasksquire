@@ -53,6 +53,15 @@ data class Task(
         return copy(depends = depList.joinToString(",").ifBlank { null })
     }
 
+    fun isBlockedBy(tasksByUuid: Map<String, Task>): Boolean {
+        val dependencies = getDependencyList()
+        if (dependencies.isEmpty()) return false
+        return dependencies.any { depUuid ->
+            val depTask = tasksByUuid[depUuid]
+            depTask == null || (depTask.status != TaskStatus.COMPLETED && depTask.status != TaskStatus.DELETED)
+        }
+    }
+
     fun computedUrgency(): Double {
         var score = 0.0
         when (priority) {

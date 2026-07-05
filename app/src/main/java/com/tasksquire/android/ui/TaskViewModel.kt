@@ -85,7 +85,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    private val taskIndex: StateFlow<Map<String, Task>> = allTasks
+    val taskIndex: StateFlow<Map<String, Task>> = allTasks
         .map { tasks -> tasks.associateBy { it.uuid } }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
@@ -492,15 +492,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private fun isTaskBlocked(task: Task, index: Map<String, Task>): Boolean {
-        val dependencies = task.getDependencyList()
-        if (dependencies.isEmpty()) return false
-
-        return dependencies.any { depUuid ->
-            val depTask = index[depUuid]
-            depTask == null || (depTask.status != TaskStatus.COMPLETED && depTask.status != TaskStatus.DELETED)
-        }
-    }
+    private fun isTaskBlocked(task: Task, index: Map<String, Task>): Boolean = task.isBlockedBy(index)
 
     private fun matchesDueFilter(task: Task, dueFilter: DueFilter): Boolean {
         if (dueFilter == DueFilter.ALL) return true

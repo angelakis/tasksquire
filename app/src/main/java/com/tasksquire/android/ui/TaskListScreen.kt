@@ -53,6 +53,7 @@ fun TaskListScreen(
     val recentHistory by viewModel.recentHistory.collectAsState()
     val allProjects by viewModel.projects.collectAsState()
     val allTags by viewModel.allTags.collectAsState()
+    val taskIndex by viewModel.taskIndex.collectAsState()
 
     var showCompleted by remember { mutableStateOf(false) }
     var searchExpanded by remember { mutableStateOf(false) }
@@ -308,6 +309,7 @@ fun TaskListScreen(
                     ) { task ->
                         TaskItem(
                             task = task,
+                            isBlocked = task.isBlockedBy(taskIndex),
                             onClick = { onTaskClick(task.uuid) },
                             onComplete = { viewModel.completeTask(task.uuid) },
                             onDelete = { viewModel.deleteTask(task.uuid) },
@@ -553,6 +555,7 @@ fun ReportsBottomSheet(
 @Composable
 fun TaskItem(
     task: Task,
+    isBlocked: Boolean = false,
     onClick: () -> Unit,
     onComplete: () -> Unit,
     onDelete: () -> Unit,
@@ -616,7 +619,16 @@ fun TaskItem(
                         textDecoration = if (task.status == TaskStatus.COMPLETED)
                             TextDecoration.LineThrough else null,
                         maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+
+                    // Urgency readout, so it's clear why a task sorted where it did
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = String.format(Locale.getDefault(), "%.1f", task.computedUrgency()),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                     )
                 }
 
@@ -649,18 +661,17 @@ fun TaskItem(
                         }
                     }
                     task.due?.let {
-                        val dateStr = SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(it))
-                        val isOverdue = it < System.currentTimeMillis() && task.status == TaskStatus.PENDING
+                        val isActive = task.status == TaskStatus.PENDING || task.status == TaskStatus.WAITING
                         TaskChip(
-                            text = dateStr,
-                            color = if (isOverdue) MaterialTheme.colorScheme.errorContainer
-                            else MaterialTheme.colorScheme.secondaryContainer
+                            text = formatDueLabel(it),
+                            color = dueChipColor(it, isActive)
                         )
                     }
                     if (task.getDependencyList().isNotEmpty()) {
                         TaskChip(
-                            text = "Depends ${task.getDependencyList().size}",
-                            color = MaterialTheme.colorScheme.tertiaryContainer
+                            text = if (isBlocked) "Blocked" else "Depends ${task.getDependencyList().size}",
+                            color = if (isBlocked) MaterialTheme.colorScheme.errorContainer
+                            else MaterialTheme.colorScheme.tertiaryContainer
                         )
                     }
                     for (tag in task.getTagList().take(3)) {
@@ -712,6 +723,38 @@ fun PriorityBadge(priority: TaskPriority) {
         fontSize = 12.sp,
         modifier = Modifier.padding(end = 4.dp)
     )
+}
+
+/**
+ * Formats a due date as a countdown relative to now (e.g. "Overdue 2d", "Tomorrow",
+ * "In 3w"), falling back to an absolute date once it's far enough out that the
+ * countdown stops being meaningful at a glance.
+ */
+fun formatDueLabel(due: Long, now: Long = System.currentTimeMillis()): String {
+    val diffDays = (due - now) / (1000.0 * 60 * 60 * 24)
+    return when {
+        diffDays < 0 -> {
+            val overdueDays = kotlin.math.ceil(-diffDays).toInt()
+            if (overdueDays <= 1) "Overdue" else "Overdue ${overdueDays}d"
+        }
+        diffDays < 1 -> "Today"
+        diffDays < 2 -> "Tomorrow"
+        diffDays < 7 -> "In ${kotlin.math.ceil(diffDays).toInt()}d"
+        diffDays < 30 -> "In ${(diffDays / 7).toInt()}w"
+        else -> SimpleDateFormat("MMM dd", Locale.getDefault()).format(Date(due))
+    }
+}
+
+@Composable
+fun dueChipColor(due: Long, isActive: Boolean, now: Long = System.currentTimeMillis()): Color {
+    if (!isActive) return MaterialTheme.colorScheme.secondaryContainer
+    val diffDays = (due - now) / (1000.0 * 60 * 60 * 24)
+    return when {
+        diffDays < 0 -> MaterialTheme.colorScheme.errorContainer
+        diffDays < 2 -> MaterialTheme.colorScheme.tertiaryContainer
+        diffDays < 7 -> MaterialTheme.colorScheme.secondaryContainer
+        else -> MaterialTheme.colorScheme.surfaceVariant
+    }
 }
 
 @Composable
