@@ -301,7 +301,7 @@ fun TaskListScreen(
             } else {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(vertical = 8.dp)
+                    contentPadding = PaddingValues(vertical = 4.dp)
                 ) {
                     items(
                         items = tasks.sortedByDescending { it.computedUrgency() },
@@ -584,12 +584,12 @@ fun TaskItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .padding(horizontal = 12.dp, vertical = 2.dp)
             .clickable(onClick = onClick),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
         Row(
-            modifier = Modifier.padding(12.dp),
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Completion checkbox
@@ -615,7 +615,7 @@ fun TaskItem(
 
                     Text(
                         text = task.description,
-                        style = MaterialTheme.typography.bodyLarge,
+                        style = MaterialTheme.typography.bodyMedium,
                         textDecoration = if (task.status == TaskStatus.COMPLETED)
                             TextDecoration.LineThrough else null,
                         maxLines = 2,
@@ -641,7 +641,7 @@ fun TaskItem(
                     )
                 }
 
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(2.dp))
 
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -655,9 +655,9 @@ fun TaskItem(
                                     RoundedCornerShape(4.dp)
                                 )
                                 .clickable { onProjectClick(project) }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
                         ) {
-                            Text(text = project, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(text = project, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                     task.due?.let {
@@ -682,9 +682,9 @@ fun TaskItem(
                                     RoundedCornerShape(4.dp)
                                 )
                                 .clickable { onTagClick(tag) }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .padding(horizontal = 5.dp, vertical = 1.dp)
                         ) {
-                            Text(text = "+$tag", fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(text = "+$tag", fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -762,11 +762,11 @@ fun TaskChip(text: String, color: Color) {
     Box(
         modifier = Modifier
             .background(color, RoundedCornerShape(4.dp))
-            .padding(horizontal = 6.dp, vertical = 2.dp)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
     ) {
         Text(
             text = text,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
