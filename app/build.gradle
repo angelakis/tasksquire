@@ -12,8 +12,9 @@ android {
         applicationId "com.tasksquire.android"
         minSdk 26
         targetSdk 34
-        versionCode 1
-        versionName "1.0"
+        // CI sets these: the code from the commit count (so every build can update the last), the name from the tag.
+        versionCode((System.getenv("VERSION_CODE") ?: "1").toInteger())
+        versionName((System.getenv("VERSION_NAME") ?: "1.0").replaceFirst("^v", ""))
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -21,8 +22,26 @@ android {
         }
     }
 
+    // One permanent key for releases, so new APKs install as updates and keep the app's data.
+    // Without it (local builds), debug uses the machine's debug key and release stays unsigned.
+    def keystore = System.getenv("KEYSTORE_FILE")
+    signingConfigs {
+        if (keystore) {
+            stable {
+                storeFile file(keystore)
+                storePassword System.getenv("KEYSTORE_PASSWORD")
+                keyAlias System.getenv("KEY_ALIAS")
+                keyPassword System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        debug {
+            if (keystore) signingConfig signingConfigs.stable
+        }
         release {
+            if (keystore) signingConfig signingConfigs.stable
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -46,12 +65,23 @@ android {
             excludes += '/META-INF/{AL2.0,LGPL2.1}'
         }
     }
+    // AGP encrypts this dependency list for Google Play with a random key, so every signed APK would differ.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
     testOptions {
         unitTests {
             returnDefaultValues = true
             includeAndroidResources = true
         }
     }
+}
+
+// The merged ART startup profile (assets/dexopt/baseline.prof) isn't deterministic, so release APKs would differ
+// between builds. Without it the app is compiled on the device after install instead.
+tasks.configureEach { task ->
+    if (task.name.contains('ArtProfile')) task.enabled = false
 }
 
 dependencies {
